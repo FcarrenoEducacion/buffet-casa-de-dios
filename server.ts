@@ -1293,13 +1293,33 @@ function normalizePaymentMethod(method: any): "efectivo" | "transferencia" | "qr
   return "efectivo";
 }
 
-async function getOpenCashSession(): Promise<any | null> {
+async function getOpenCashSession(preferredSessionId?: string | null): Promise<any | null> {
+  const normalizeSessionStatus = (status: any) => String(status || "").trim().toLowerCase();
+  const openStatuses = ["open", "abierta", "activo", "activa", "active"];
+
   if (supabase) {
     try {
+      if (preferredSessionId) {
+        const { data, error } = await supabase
+          .from("cash_sessions")
+          .select("*")
+          .eq("id", preferredSessionId)
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          const candidate = mapDbToSession(data[0]);
+          if (openStatuses.includes(normalizeSessionStatus(candidate.status))) {
+            return candidate;
+          }
+        } else if (error) {
+          console.error("[OPEN CASH SESSION] Error buscando sesión preferida:", error.message);
+        }
+      }
+
       const { data, error } = await supabase
         .from("cash_sessions")
         .select("*")
-        .eq("status", "open")
+        .in("status", openStatuses)
         .order("opened_at", { ascending: false })
         .limit(1);
 
@@ -1317,7 +1337,11 @@ async function getOpenCashSession(): Promise<any | null> {
 
   try {
     const sessions = loadSessions();
-    return sessions.find((s: any) => s.status === "open") || null;
+    if (preferredSessionId) {
+      const preferred = sessions.find((s: any) => s.id === preferredSessionId && openStatuses.includes(normalizeSessionStatus(s.status)));
+      if (preferred) return preferred;
+    }
+    return sessions.find((s: any) => openStatuses.includes(normalizeSessionStatus(s.status))) || null;
   } catch (err) {
     console.error("[OPEN CASH SESSION] Error local:", err);
     return null;
@@ -1484,6 +1508,8 @@ function mapDbToOrder(row: any, dbItems: any[] = []): any {
   let mappedPaymentStatus = "pendiente";
   if (row.payment_status === "paid" || row.payment_status === "pagado") {
     mappedPaymentStatus = "pagado";
+  } else if (row.payment_status === "cancelled" || row.payment_status === "cancelado") {
+    mappedPaymentStatus = "cancelado";
   } else if (row.payment_status === "pending" || row.payment_status === "pendiente") {
     mappedPaymentStatus = "pendiente";
   }
@@ -1502,6 +1528,8 @@ function mapDbToOrder(row: any, dbItems: any[] = []): any {
     mappedStatus = "listo";
   } else if (row.status === "delivered") {
     mappedStatus = "entregado";
+  } else if (row.status === "dismissed" || row.status === "cancelled" || row.status === "desestimado") {
+    mappedStatus = "desestimado";
   } else {
     mappedStatus = row.status || "recibido";
   }
@@ -1536,6 +1564,8 @@ function mapOrderToDb(order: any): any {
   let dbPaymentStatus = "pending";
   if (order.paymentStatus === "pagado" || order.paymentStatus === "paid") {
     dbPaymentStatus = "paid";
+  } else if (order.paymentStatus === "cancelado" || order.paymentStatus === "cancelled") {
+    dbPaymentStatus = "cancelled";
   } else if (order.paymentStatus === "pendiente" || order.paymentStatus === "pending") {
     dbPaymentStatus = "pending";
   }
@@ -1544,6 +1574,8 @@ function mapOrderToDb(order: any): any {
   let dbStatus = "pending_payment";
   if (dbPaymentStatus === "pending") {
     dbStatus = "pending_payment";
+  } else if (dbPaymentStatus === "cancelled" || order.status === "desestimado" || order.status === "dismissed") {
+    dbStatus = "dismissed";
   } else {
     if (order.status === "recibido" || order.status === "approved") {
       dbStatus = "approved";
@@ -1731,22 +1763,7 @@ app.post("/api/orders", async (req, res) => {
 
 // Helper to get active cash session ID
 async function getActiveSessionId(): Promise<string | null> {
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("cash_sessions")
-        .select("id")
-        .eq("status", "open")
-        .single();
-      if (!error && data) {
-        return data.id;
-      }
-    } catch (err) {
-      // Ignore
-    }
-  }
-  const sessions = loadSessions();
-  const active = sessions.find(s => s.status === 'open');
+  const active = await getOpenCashSession();
   if (active) {
     await ensureSessionSynced(active);
     return active.id;
@@ -2747,15 +2764,16 @@ app.post("/api/orders/manual", async (req, res) => {
 // POST /api/orders/:id/pay
 app.post("/api/orders/:id/pay", async (req, res) => {
   const { id } = req.params;
-  const { paymentMethod, cashierName } = req.body;
+  const { paymentMethod, cashierName, cashSessionId } = req.body;
 
-  const currentSession = await getOpenCashSession();
+  const currentSession = await getOpenCashSession(cashSessionId || null);
   const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
 
   console.log("[PAY ORDER] Validando caja abierta:", {
     orderId: id,
     paymentMethod,
     normalizedPaymentMethod,
+    requestedCashSessionId: cashSessionId,
     currentSessionId: currentSession?.id,
     currentSessionStatus: currentSession?.status
   });
@@ -2785,19 +2803,25 @@ app.post("/api/orders/:id/pay", async (req, res) => {
   }
 
   const order = orders[orderIndex];
-  const method = normalizedPaymentMethod;
+  const alreadyPaid = order.paymentStatus === "pagado" || order.paymentStatus === "paid";
 
-  const oldStatus = order.status;
-  const oldPaymentStatus = order.paymentStatus;
+  // Idempotencia: si el pedido ya fue cobrado, no crear otro movimiento ni duplicar venta.
+  if (alreadyPaid) {
+    console.log(`[PAY ORDER] Pedido ${id} ya estaba cobrado. No se duplica movimiento.`);
+    return res.json({ ...order, alreadyPaid: true });
+  }
+
+  const method = normalizedPaymentMethod;
+  const paidAt = new Date().toISOString();
 
   orders[orderIndex].paymentStatus = "pagado";
   orders[orderIndex].paymentMethod = method;
-  orders[orderIndex].cashierName = cashierName || currentSession.openedBy;
+  orders[orderIndex].cashierName = cashierName || currentSession.openedBy || "Rita";
   orders[orderIndex].cashSessionId = currentSession.id;
-  orders[orderIndex].paidAt = new Date().toISOString();
-  orders[orderIndex].approvedAt = new Date().toISOString();
-  orders[orderIndex].status = "recibido"; // Set to recibido locally so Cocina sees it immediately as approved
-  orders[orderIndex].updatedAt = new Date().toISOString();
+  orders[orderIndex].paidAt = paidAt;
+  orders[orderIndex].approvedAt = paidAt;
+  orders[orderIndex].status = "recibido";
+  orders[orderIndex].updatedAt = paidAt;
 
   saveOrders(orders);
 
@@ -2809,15 +2833,18 @@ app.post("/api/orders/:id/pay", async (req, res) => {
     paymentMethod: method,
     amount: order.total,
     description: `Cobro Pedido ${order.id} - ${order.customerName}`,
-    createdBy: cashierName || currentSession.openedBy,
-    createdAt: new Date().toISOString()
+    concept: "Venta pedido",
+    createdBy: cashierName || currentSession.openedBy || "Rita",
+    createdAt: paidAt
   };
 
   const movements = loadMovements();
-  movements.unshift(newMovement);
-  saveMovements(movements);
+  const existingLocalMovement = movements.find(m => m.orderId === order.id && m.type === "sale");
+  if (!existingLocalMovement) {
+    movements.unshift(newMovement);
+    saveMovements(movements);
+  }
 
-  let supabaseResponse = null;
   if (supabase) {
     try {
       const dbUpdate = {
@@ -2826,50 +2853,125 @@ app.post("/api/orders/:id/pay", async (req, res) => {
         status: "approved",
         cashier_name: cashierName || currentSession.openedBy || "Rita",
         cash_session_id: currentSession.id,
-        paid_at: new Date().toISOString(),
-        approved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        paid_at: paidAt,
+        approved_at: paidAt,
+        updated_at: paidAt
       };
 
       const { data, error } = await supabase
         .from("orders")
         .update(dbUpdate)
         .eq("id", order.id)
+        .in("payment_status", ["pending", "pendiente"])
         .select("*");
 
-      supabaseResponse = { data, error };
+      if (error) {
+        console.error("[PAY ORDER] Error actualizando pedido en Supabase:", error.message);
+      }
 
-      console.log(`[DIAGNOSTIC LOG /pay]`, {
-        orderId: order.id,
-        oldStatus,
-        oldPaymentStatus,
-        newStatus: orders[orderIndex].status,
-        newPaymentStatus: orders[orderIndex].paymentStatus,
-        dbUpdate,
-        supabaseResponse: JSON.stringify(supabaseResponse)
-      });
+      if (data && data.length === 0) {
+        console.log(`[PAY ORDER] Supabase no actualizó ${order.id} porque ya no estaba pendiente. No se duplica movimiento.`);
+      } else {
+        const { data: existingMovs, error: movCheckError } = await supabase
+          .from("cash_movements")
+          .select("id")
+          .eq("order_id", order.id)
+          .eq("type", "sale")
+          .limit(1);
 
-      const dbMov = mapMovementToDb({
-        id: newMovement.id,
-        cashSessionId: currentSession.id,
-        orderId: order.id,
-        type: "sale",
-        paymentMethod: method,
-        amount: order.total,
-        description: `Cobro Pedido ${order.id} - ${order.customerName}`,
-        concept: "Venta pedido",
-        createdBy: cashierName || currentSession.openedBy || "Rita",
-        createdAt: new Date().toISOString()
-      });
+        if (movCheckError) {
+          console.error("[PAY ORDER] Error verificando movimiento existente:", movCheckError.message);
+        }
 
-      await supabase.from("cash_movements").insert([dbMov]);
-      console.log(`✅ [SUPABASE] Cobro de pedido ${id} e inserción de movimiento completado.`);
+        if (!existingMovs || existingMovs.length === 0) {
+          const dbMov = mapMovementToDb(newMovement);
+          const { error: movInsertError } = await supabase.from("cash_movements").insert([dbMov]);
+          if (movInsertError) {
+            console.error("[PAY ORDER] Error insertando movimiento:", movInsertError.message);
+          }
+        } else {
+          console.log(`[PAY ORDER] Movimiento de venta para ${order.id} ya existía. No se duplica.`);
+        }
+      }
+      console.log(`✅ [SUPABASE] Cobro de pedido ${id} procesado con idempotencia.`);
     } catch (err: any) {
       console.error("Error inserting movement or updating order in Supabase:", err.message);
     }
   }
 
   res.json(orders[orderIndex]);
+});
+
+
+// POST /api/orders/:id/dismiss - Desestimar pedido con clave administrativa
+app.post("/api/orders/:id/dismiss", async (req, res) => {
+  const { id } = req.params;
+  const { adminPassword, reason, dismissedBy } = req.body;
+
+  const isAuthorized = await isValidAdminPassword(adminPassword);
+  if (!isAuthorized) {
+    return res.status(403).json({ error: "Clave administrativa incorrecta. No se desestimó el pedido." });
+  }
+
+  let orderIndex = orders.findIndex(o => o.id === id);
+  if (orderIndex === -1 && supabase) {
+    try {
+      const { data: dbOrder } = await supabase.from("orders").select("*").eq("id", id).single();
+      if (dbOrder) {
+        const { data: dbItems } = await supabase.from("order_items").select("*").eq("order_id", id);
+        const mapped = mapDbToOrder(dbOrder, dbItems || []);
+        orders.unshift(mapped);
+        orderIndex = 0;
+      }
+    } catch (err) {
+      console.error("Error fetching order before dismiss:", err);
+    }
+  }
+
+  if (orderIndex === -1) {
+    return res.status(404).json({ error: "Pedido no encontrado." });
+  }
+
+  const order = orders[orderIndex];
+  if (order.paymentStatus === "pagado" || order.paymentStatus === "paid") {
+    return res.status(400).json({ error: "No se puede desestimar un pedido que ya fue cobrado." });
+  }
+
+  const now = new Date().toISOString();
+  const noteText = `Desestimado por ${dismissedBy || "Rita"}${reason ? `: ${reason}` : ""}`;
+
+  orders[orderIndex] = {
+    ...order,
+    status: "desestimado",
+    paymentStatus: "cancelado",
+    notes: order.notes ? `${order.notes}
+${noteText}` : noteText,
+    updatedAt: now
+  };
+  saveOrders(orders);
+
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "dismissed",
+          payment_status: "cancelled",
+          notes: orders[orderIndex].notes,
+          updated_at: now
+        })
+        .eq("id", id)
+        .in("payment_status", ["pending", "pendiente"]);
+
+      if (error) {
+        console.error("Error desestimando pedido en Supabase:", error.message);
+      }
+    } catch (err: any) {
+      console.error("Error conectando con Supabase al desestimar pedido:", err.message || err);
+    }
+  }
+
+  return res.json({ success: true, order: orders[orderIndex] });
 });
 
 // GET /api/cash-movements

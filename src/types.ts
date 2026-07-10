@@ -1,4 +1,4 @@
-export type OrderStatus = 'recibido' | 'preparando' | 'listo' | 'entregado';
+export type OrderStatus = 'recibido' | 'preparando' | 'listo' | 'entregado' | 'desestimado';
 
 export interface Dish {
   id: string;
@@ -36,7 +36,7 @@ export interface Order {
   customerName: string;
   customerPhone?: string;
   paymentMethod: 'efectivo' | 'transferencia' | 'qr' | 'tarjeta' | 'simulado_tarjeta';
-  paymentStatus: 'pendiente' | 'pagado';
+  paymentStatus: 'pendiente' | 'pagado' | 'cancelado';
   source?: 'qr_customer' | 'manual_cashier';
   cashierName?: string;
   cashSessionId?: string;

@@ -81,6 +81,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [sessionReport, setSessionReport] = useState<any>(null);
   const [isViewReportOpen, setIsViewReportOpen] = useState<boolean>(false);
   const [selectedPayOrder, setSelectedPayOrder] = useState<any>(null);
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [dismissingOrderId, setDismissingOrderId] = useState<string | null>(null);
 
   // Manual Order Form States
   const [manualCustomer, setManualCustomer] = useState<string>('');
@@ -515,35 +517,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handlePayOrder = async (orderId: string, method: string) => {
+    if (payingOrderId) return;
+
+    setPayingOrderId(orderId);
     try {
+      // Refrescamos la caja antes de cobrar, porque en Vercel el estado puede quedar viejo en el navegador.
+      let activeSession = currentSession;
+      try {
+        const sessionRes = await fetch('/api/cash-session/current');
+        if (sessionRes.ok) {
+          const sessionData = await sessionRes.json();
+          activeSession = sessionData.session || sessionData;
+          if (activeSession?.id) setCurrentSession(activeSession);
+        }
+      } catch (sessionErr) {
+        console.warn('No se pudo refrescar la caja antes de cobrar:', sessionErr);
+      }
+
       const res = await fetch(`/api/orders/${orderId}/pay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentMethod: method,
-          cashierName: currentSession?.openedBy || 'Rita'
+          cashierName: activeSession?.openedBy || currentSession?.openedBy || 'Rita',
+          cashSessionId: activeSession?.id || currentSession?.id || null
         })
       });
       const data = await res.json();
       if (res.ok) {
-        // Safety check: ensure status is received/preparing/ready and items array has length
-        const isApproved = data && (data.status === 'recibido' || data.status === 'preparando' || data.status === 'listo');
-        const hasItems = data && data.items && data.items.length > 0;
-
-        if (isApproved && hasItems) {
-          alert(`¡Pedido ${orderId} cobrado exitosamente con ${method}!`);
-          fetchCurrentSession();
-          setSelectedPayOrder(null);
-          // Invoke parent update if present
-          if (onUpdatePaymentStatus) {
-            onUpdatePaymentStatus(orderId, 'pagado');
-          }
-          if (onRefreshOrders) {
-            onRefreshOrders();
-          }
+        if (data?.alreadyPaid) {
+          alert(`El pedido ${orderId} ya estaba cobrado. No se duplicó la venta.`);
         } else {
-          console.warn("⚠️ Warning: Order status not approved or items missing on /pay:", data);
-          alert("No se pudo enviar el pedido a cocina. Intente nuevamente.");
+          alert(`¡Pedido ${orderId} cobrado exitosamente con ${method}!`);
+        }
+
+        fetchCurrentSession();
+        setSelectedPayOrder(null);
+        if (onUpdatePaymentStatus) {
+          onUpdatePaymentStatus(orderId, 'pagado');
+        }
+        if (onRefreshOrders) {
+          onRefreshOrders();
         }
       } else {
         alert(data.error || "Fallo al registrar pago.");
@@ -551,6 +565,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch (err) {
       console.error(err);
       alert("Error de conexión al cobrar pedido.");
+    } finally {
+      setPayingOrderId(null);
+    }
+  };
+
+  const handleDismissOrder = async (order: any) => {
+    if (dismissingOrderId) return;
+
+    const adminPassword = window.prompt(`Ingrese la clave administrativa para desestimar el pedido ${order.id}:`);
+    if (!adminPassword) return;
+
+    const reason = window.prompt('Motivo de desestimación del pedido:', 'Cliente desistió / pedido cargado por error') || '';
+
+    setDismissingOrderId(order.id);
+    try {
+      const res = await fetch(`/api/orders/${order.id}/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminPassword,
+          reason,
+          dismissedBy: currentSession?.openedBy || 'Rita'
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Pedido ${order.id} desestimado correctamente.`);
+        if (onRefreshOrders) onRefreshOrders();
+        fetchCurrentSession();
+      } else {
+        alert(data.error || 'No se pudo desestimar el pedido.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error de conexión al desestimar pedido.');
+    } finally {
+      setDismissingOrderId(null);
     }
   };
 
@@ -2194,13 +2245,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </div>
 
                           {order.paymentStatus === 'pendiente' ? (
-                            <button
-                              onClick={() => setSelectedPayOrder(order)}
-                              className="w-full bg-emerald-500 hover:bg-emerald-400 text-black hover:scale-[1.02] py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/10 transition-all font-display animate-pulse"
-                            >
-                              <Check className="w-4 h-4 text-black stroke-[3]" />
-                              <span>Confirmar Pago Recibido</span>
-                            </button>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <button
+                                onClick={() => setSelectedPayOrder(order)}
+                                disabled={payingOrderId === order.id || dismissingOrderId === order.id}
+                                className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black hover:scale-[1.02] py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/10 transition-all font-display animate-pulse"
+                              >
+                                <Check className="w-4 h-4 text-black stroke-[3]" />
+                                <span>Confirmar Pago</span>
+                              </button>
+                              <button
+                                onClick={() => handleDismissOrder(order)}
+                                disabled={payingOrderId === order.id || dismissingOrderId === order.id}
+                                className="w-full bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed text-rose-300 border border-rose-500/30 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-all font-display"
+                              >
+                                <X className="w-4 h-4 text-rose-300 stroke-[3]" />
+                                <span>{dismissingOrderId === order.id ? 'Desestimando...' : 'Desestimar'}</span>
+                              </button>
+                            </div>
                           ) : (
                             <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider text-center flex items-center justify-center gap-1.5 font-display">
                               <CheckSquare className="w-4 h-4 text-emerald-400" />
@@ -4359,6 +4421,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
               
               <button
                 onClick={() => handlePayOrder(selectedPayOrder.id, 'efectivo')}
+                disabled={payingOrderId === selectedPayOrder.id}
                 className="w-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 p-3.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-between gap-1 transition-all cursor-pointer"
               >
                 <span className="flex items-center gap-2">
@@ -4370,6 +4433,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
 
               <button
                 onClick={() => handlePayOrder(selectedPayOrder.id, 'transferencia')}
+                disabled={payingOrderId === selectedPayOrder.id}
                 className="w-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/20 p-3.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-between gap-1 transition-all cursor-pointer"
               >
                 <span className="flex items-center gap-2">
@@ -4381,6 +4445,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
 
               <button
                 onClick={() => handlePayOrder(selectedPayOrder.id, 'qr')}
+                disabled={payingOrderId === selectedPayOrder.id}
                 className="w-full bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/20 p-3.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-between gap-1 transition-all cursor-pointer"
               >
                 <span className="flex items-center gap-2">
@@ -4392,6 +4457,7 @@ CREATE TABLE IF NOT EXISTS cash_movements (
 
               <button
                 onClick={() => handlePayOrder(selectedPayOrder.id, 'tarjeta')}
+                disabled={payingOrderId === selectedPayOrder.id}
                 className="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 p-3.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center justify-between gap-1 transition-all cursor-pointer"
               >
                 <span className="flex items-center gap-2">
