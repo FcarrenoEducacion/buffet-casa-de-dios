@@ -62,17 +62,6 @@ const ai = new GoogleGenAI({
 
 app.use(express.json({ limit: "10mb" }));
 
-// Normalize payment methods for consistency across the system
-function normalizePaymentMethod(method: string): string {
-  const m = String(method || "").toLowerCase().trim();
-  if (!m) return "efectivo";
-  if (m.includes("efec") || m.includes("cash")) return "efectivo";
-  if (m.includes("trans")) return "transferencia";
-  if (m.includes("qr") || m.includes("mercado")) return "qr";
-  if (m.includes("tarj") || m.includes("card")) return "tarjeta";
-  return "efectivo"; // Default fallback
-}
-
 // Files for persistence
 const DISHES_FILE = path.join(process.cwd(), "dishes.json");
 const CONFIG_FILE = path.join(process.cwd(), "config.json");
@@ -1251,6 +1240,89 @@ const handleImageUploadRequest = async (req: express.Request, res: express.Respo
 
 app.post("/api/upload", handleImageUploadRequest);
 app.post("/api/upload-image", handleImageUploadRequest);
+function normalizePaymentMethod(method: any): "efectivo" | "transferencia" | "qr" | "tarjeta" {
+  const raw = String(method || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (
+    raw === "efectivo" ||
+    raw === "efectivo_caja" ||
+    raw.includes("efectivo") ||
+    raw.includes("cash")
+  ) {
+    return "efectivo";
+  }
+
+  if (
+    raw === "transferencia" ||
+    raw === "pago_movil" ||
+    raw.includes("transfer") ||
+    raw.includes("banc")
+  ) {
+    return "transferencia";
+  }
+
+  if (
+    raw === "qr" ||
+    raw === "qr_caja" ||
+    raw.includes("mercadopago") ||
+    raw.includes("mercado pago") ||
+    raw.includes("codigo qr") ||
+    raw.includes("código qr")
+  ) {
+    return "qr";
+  }
+
+  if (
+    raw === "tarjeta" ||
+    raw === "tarjeta_caja" ||
+    raw === "simulado_tarjeta" ||
+    raw.includes("card") ||
+    raw.includes("posnet") ||
+    raw.includes("credito") ||
+    raw.includes("debito") ||
+    raw.includes("crédito") ||
+    raw.includes("débito")
+  ) {
+    return "tarjeta";
+  }
+
+  return "efectivo";
+}
+
+async function getOpenCashSession(): Promise<any | null> {
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("cash_sessions")
+        .select("*")
+        .eq("status", "open")
+        .order("opened_at", { ascending: false })
+        .limit(1);
+
+      if (error) {
+        console.error("[OPEN CASH SESSION] Error Supabase:", error.message);
+      }
+
+      if (!error && data && data.length > 0) {
+        return mapDbToSession(data[0]);
+      }
+    } catch (err: any) {
+      console.error("[OPEN CASH SESSION] Error inesperado:", err.message || err);
+    }
+  }
+
+  try {
+    const sessions = loadSessions();
+    return sessions.find((s: any) => s.status === "open") || null;
+  } catch (err) {
+    console.error("[OPEN CASH SESSION] Error local:", err);
+    return null;
+  }
+}
 
 // --- DATABASE MAPPING HELPERS FOR COHESIVE SYSTEM ---
 function mapDbToSession(row: any): any {
@@ -2580,26 +2652,8 @@ app.post("/api/orders/manual", async (req, res) => {
     return res.status(400).json({ error: "Faltan datos obligatorios para el pedido manual." });
   }
 
-  let currentSession = null;
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("cash_sessions")
-        .select("*")
-        .eq("status", "open")
-        .single();
-      if (!error && data) {
-        currentSession = mapDbToSession(data);
-      }
-    } catch (err) {
-      console.error("Error fetching open session from Supabase:", err);
-    }
-  }
-
-  if (!currentSession) {
-    const sessions = loadSessions();
-    currentSession = sessions.find(s => s.status === 'open');
-  }
+  const currentSession = await getOpenCashSession();
+  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
 
   if (!currentSession) {
     return res.status(400).json({ error: "Debe abrir caja antes de registrar un pedido manual." });
@@ -2616,7 +2670,7 @@ app.post("/api/orders/manual", async (req, res) => {
     updatedAt: new Date().toISOString(),
     customerName,
     customerPhone: customerPhone || "",
-    paymentMethod, // efectivo, transferencia, qr, tarjeta
+    paymentMethod: normalizedPaymentMethod, // efectivo, transferencia, qr, tarjeta
     paymentStatus: "pagado", // Immediately paid
     source: "manual_cashier",
     cashierName: currentSession.openedBy,
@@ -2664,7 +2718,7 @@ app.post("/api/orders/manual", async (req, res) => {
     cashSessionId: currentSession.id,
     orderId: newOrder.id,
     type: "manual_sale",
-    paymentMethod,
+    paymentMethod: normalizedPaymentMethod,
     amount: total,
     description: `Pedido manual - ${customerName}`,
     createdBy: currentSession.openedBy,
@@ -2695,25 +2749,16 @@ app.post("/api/orders/:id/pay", async (req, res) => {
   const { id } = req.params;
   const { paymentMethod, cashierName } = req.body;
 
-  let currentSession = null;
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("cash_sessions")
-        .select("*")
-        .eq("status", "open")
-        .single();
-      if (!error && data) {
-        currentSession = mapDbToSession(data);
-      }
-    } catch (err) {
-      console.error("Error fetching open session from Supabase:", err);
-    }
-  }
-  if (!currentSession) {
-    const sessions = loadSessions();
-    currentSession = sessions.find(s => s.status === 'open');
-  }
+  const currentSession = await getOpenCashSession();
+  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
+
+  console.log("[PAY ORDER] Validando caja abierta:", {
+    orderId: id,
+    paymentMethod,
+    normalizedPaymentMethod,
+    currentSessionId: currentSession?.id,
+    currentSessionStatus: currentSession?.status
+  });
 
   if (!currentSession) {
     return res.status(400).json({ error: "Debe abrir caja antes de poder cobrar un pedido." });
@@ -2740,7 +2785,7 @@ app.post("/api/orders/:id/pay", async (req, res) => {
   }
 
   const order = orders[orderIndex];
-  const method = paymentMethod || 'efectivo'; // default fallback
+  const method = normalizedPaymentMethod;
 
   const oldStatus = order.status;
   const oldPaymentStatus = order.paymentStatus;
@@ -2812,7 +2857,7 @@ app.post("/api/orders/:id/pay", async (req, res) => {
         paymentMethod: method,
         amount: order.total,
         description: `Cobro Pedido ${order.id} - ${order.customerName}`,
-        concept: "Venta pedido QR",
+        concept: "Venta pedido",
         createdBy: cashierName || currentSession.openedBy || "Rita",
         createdAt: new Date().toISOString()
       });
