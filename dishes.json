@@ -1,0 +1,303 @@
+[
+  {
+    "id": "dish_cafe_leche",
+    "name": "Café con Leche + 1 Medialuna",
+    "nameEn": "Coffee with Milk + 1 Medialuna Croissant",
+    "description": "Delicioso café expresso con leche cremosa, servido caliente junto a una medialuna tradicional hojaldrada horneada en el día.",
+    "descriptionEn": "Delicious espresso coffee with warm creamy milk, served alongside a freshly baked sweet medialuna pastry.",
+    "price": 5000,
+    "category": "Café y Bebidas",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/dishes/1783470846324_cafeconlecheymedialuna.png",
+    "tags": [
+      "Clásico",
+      "Caliente"
+    ],
+    "purpose": "Preparado fresco con granos seleccionados de café arábico y leche emulsionada a temperatura perfecta.",
+    "purposeEn": "Freshly brewed with premium Arabica coffee beans and perfectly steamed milk.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "cover"
+  },
+  {
+    "id": "dish_agua_gas",
+    "name": "Agua Mineral Sin Gas (500ml)",
+    "nameEn": "Still Mineral Water (500ml)",
+    "description": "Agua mineral fresca de manantial embotellada, ideal para hidratarse sanamente a cualquier hora.",
+    "descriptionEn": "Fresh source bottled still mineral water, ideal for refreshing hydration.",
+    "price": 1300,
+    "category": "Café y Bebidas",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/dishes/1783470269213_aguamineral500ml.jpg.jfif",
+    "tags": [
+      "Saludable",
+      "Frío"
+    ],
+    "purpose": "Agua mineral natural purificada y de bajo contenido en sodio, ideal para refrescar el paladar.",
+    "purposeEn": "Pure natural mineral water with low sodium content, perfect for refreshing the palate.",
+    "available": true,
+    "stock": 19,
+    "imageFit": "contain"
+  },
+  {
+    "id": "dish_agua_gas_2",
+    "name": "Agua Mineral Sin Gas Grande (2L)",
+    "nameEn": "Still Mineral Water Large (2L)",
+    "description": "Botella grande de agua pura, ideal para compartir y mantenerse hidratado todo el día.",
+    "descriptionEn": "Large bottle of pure water, ideal to share and keep hydrated all day long.",
+    "price": 2000,
+    "category": "Café y Bebidas",
+    "image": "https://images.unsplash.com/photo-1523362628745-0c100150b504?w=600&auto=format&fit=crop&q=80",
+    "tags": [
+      "Familiar",
+      "Compartir"
+    ],
+    "purpose": "Botella familiar ideal para mantener la hidratación en mesas numerosas.",
+    "purposeEn": "Family-sized bottle, perfect for keeping everyone hydrated at large tables.",
+    "available": true,
+    "stock": 19
+  },
+  {
+    "id": "dish_coca_cola",
+    "name": "Gaseosa Coca-Cola Original (600ml)",
+    "nameEn": "Coca-Cola Original (600ml)",
+    "description": "La gaseosa favorita del mundo en su presentación clásica súper fría.",
+    "descriptionEn": "The world's favorite soft drink in its classic bottle, served ice cold.",
+    "price": 2300,
+    "category": "Café y Bebidas",
+    "image": "https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=600&auto=format&fit=crop&q=80",
+    "tags": [
+      "Bebida",
+      "Frío"
+    ],
+    "purpose": "Servido en vaso con hielo y rodaja de limón fresco a elección del cliente.",
+    "purposeEn": "Served ice-cold, with optional fresh lemon slice and ice.",
+    "available": true,
+    "stock": 20
+  },
+  {
+    "id": "dish_chips_lays",
+    "name": "Papas Fritas Lays Clásicas",
+    "nameEn": "Lays Classic Potato Chips",
+    "description": "Papas fritas cortadas finas, crujientes y con el toque justo de sal argentina.",
+    "descriptionEn": "Thinly sliced golden potato chips, crispy with a perfect touch of salt.",
+    "price": 1700,
+    "category": "Snacks",
+    "image": "https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=600&auto=format&fit=crop&q=80",
+    "tags": [
+      "Snack",
+      "Crujiente"
+    ],
+    "purpose": "Papas fritas clásicas seleccionadas y saladas a la perfección para acompañar cualquier bebida.",
+    "purposeEn": "Classic crispy potato chips salted to perfection to complement any cold beverage.",
+    "available": true,
+    "stock": 20
+  },
+  {
+    "id": "dish_conitos_3d",
+    "name": "Conitos 3D Queso Cheddar",
+    "nameEn": "3D Cheddar Cheese Cones",
+    "description": "Exquisitos bocaditos de maíz tridimensionales horneados con un delicioso sabor a queso cheddar intenso.",
+    "descriptionEn": "Exquisite three-dimensional corn snacks baked with an intense cheddar cheese flavor.",
+    "price": 1500,
+    "priceArs": 1500,
+    "priceUsd": 0.99,
+    "category": "Snacks",
+    "section": "Snacks",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/platos/1783473059904_ChatGPT_Image_7_jul_2026__22_10_21.png",
+    "imageUrl": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/platos/1783473059904_ChatGPT_Image_7_jul_2026__22_10_21.png",
+    "tags": [
+      "Queso",
+      "Bocadito"
+    ],
+    "purpose": "Divertido snack tridimensional de maíz con el sabor más crujiente y quesoso.",
+    "purposeEn": "Fun three-dimensional corn snack with the crispiest cheddar cheese dust.",
+    "available": true,
+    "isAvailable": true,
+    "stock": 20,
+    "imageFit": "cover"
+  },
+  {
+    "id": "dish_bagley_rex",
+    "name": "Galletitas Rex Saladas Bagley",
+    "nameEn": "Savory Rex Crackers Bagley",
+    "description": "Las tradicionales galletitas saladas Rex de Bagley, crocantes y con la forma clásica amada por todos.",
+    "descriptionEn": "Bagley's traditional Rex crackers, crispy and with the classic salted flavor.",
+    "price": 1800,
+    "category": "Snacks",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/platos/1783471545481_ChatGPT_Image_7_jul_2026__21_45_16.png",
+    "tags": [
+      "Bagley",
+      "Horneado"
+    ],
+    "purpose": "Galletas saladas clásicas ideales para acompañar una taza de café o té caliente.",
+    "purposeEn": "Traditional salted crackers, perfect alongside a warm cup of coffee or tea.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "cover"
+  },
+  {
+    "id": "dish_mini_oreo",
+    "name": "Mini Oreo Dulces",
+    "nameEn": "Mini Sweet Oreo Cookies",
+    "description": "Las mundialmente conocidas galletas de chocolate rellenas con crema de vainilla en formato mini.",
+    "descriptionEn": "The world-famous chocolate cookies filled with sweet vanilla cream in mini size.",
+    "price": 1900,
+    "category": "Galletas",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/platos/1783471438304_oreos.png",
+    "tags": [
+      "Dulce",
+      "Chocolate"
+    ],
+    "purpose": "Galletas crujientes de chocolate con relleno cremoso sabor vainilla, ideales para el postre.",
+    "purposeEn": "Crunchy bite-sized chocolate cookies with vanilla cream filling, perfect for dessert.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "cover"
+  },
+  {
+    "id": "dish_bagley_kesitas",
+    "name": "Galletitas Kesitas Bagley",
+    "nameEn": "Kesitas Bagley Cheese Crackers",
+    "description": "Galletitas horneadas con un inconfundible e intenso sabor a queso real, ideales para snackear.",
+    "descriptionEn": "Crisp baked crackers with an unmistakable and intense real cheese flavor.",
+    "price": 1800,
+    "category": "Galletas",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/dishes/1783470616172_ChatGPT_Image_28_jun_2026__15_07_44.png",
+    "tags": [
+      "Queso",
+      "Horneado"
+    ],
+    "purpose": "Elaboradas con queso horneado real que brinda un inconfundible sabor y crocancia.",
+    "purposeEn": "Made with real baked cheese, providing a unique unmistakable crunch.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "contain"
+  },
+  {
+    "id": "dish_bon_o_bon",
+    "name": "Bon o Bon Dulce de Maní",
+    "nameEn": "Bon o Bon Chocolate & Peanut",
+    "description": "El bombón argentino por excelencia: oblea crujiente rellena de crema de maní y bañada en chocolate de leche.",
+    "descriptionEn": "The typical Argentine chocolate treat: crispy wafer filled with peanut butter cream and milk chocolate.",
+    "price": 1000,
+    "category": "Galletas",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/dishes/1783470631422_bon_o_bon_leche__un_cl_sico___un_compa_ero_que_estuvo_siempre_.jfif",
+    "tags": [
+      "Bombón",
+      "Dulce"
+    ],
+    "purpose": "El dulce preferido para compartir al final del almuerzo o regalar como cortesía dulce.",
+    "purposeEn": "The perfect sweet bite to share at the end of a meal or give as a gift.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "cover"
+  },
+  {
+    "id": "dish_hamburguesa_com",
+    "name": "Hamburguesa Especial sin Papas",
+    "nameEn": "Special Burger without Fries",
+    "description": "Jugosa carne de res premium seleccionada, vegetales frescos, lechuga y tomate, con pan de papa, no incluye papas",
+    "descriptionEn": "Juicy premium selected beef, melted artisanal cheese, fresh garden vegetables, and our secret sauce, all embraced by a tender brioche bun toasted with butter.",
+    "price": 8000,
+    "category": "Platos Fuertes",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/dishes/1783470734340_hamburguesaespecial.jpg",
+    "tags": [
+      "Recomendado",
+      "Abundante"
+    ],
+    "purpose": "Recomiendo disfrutarla a término medio para apreciar la jugosidad de la carne y maridarla con una cerveza artesanal.",
+    "purposeEn": "I recommend enjoying it medium-rare to appreciate the meat's juiciness and pairing it with a craft beer.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "cover"
+  },
+  {
+    "id": "dish_cesar_salad",
+    "name": "Ensalada César con Pollo",
+    "nameEn": "Chicken Caesar Salad",
+    "description": "Colchón de lechuga romana crocante, pollo desmenuzado a la plancha, crutones dorados, queso parmesano en hebras y aderezo César casero.",
+    "descriptionEn": "Crisp romaine lettuce, grilled shredded chicken, golden croutons, shaved parmesan, and creamy house Caesar dressing.",
+    "price": 8000,
+    "category": "Platos Fuertes",
+    "image": "https://images.unsplash.com/photo-1550304943-4f24f54ddde9?w=600&auto=format&fit=crop&q=80",
+    "tags": [
+      "Saludable",
+      "Fresco"
+    ],
+    "purpose": "Lechuga hidropónica super crocante y aderezo César casero preparado en el día.",
+    "purposeEn": "Crisp hydroponic romaine lettuce and freshly made house Caesar dressing.",
+    "available": true,
+    "stock": 20
+  },
+  {
+    "id": "dish_tostado_jyq",
+    "name": "Tostado Completo de Jamón y Queso",
+    "nameEn": "Ham and Cheese Toasted Sandwich",
+    "description": "Sándwich de pan de miga tostado caliente a la plancha con abundante jamón cocido y queso muzzarella derretido.",
+    "descriptionEn": "Grilled hot toasted crumb bread sandwich stuffed with warm cooked ham and melted mozzarella cheese.",
+    "price": 3000,
+    "category": "Platos Fuertes",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/dishes/1783393909865_tostado.jpg",
+    "tags": [
+      "Caliente",
+      "Rápido"
+    ],
+    "purpose": "Pan de miga súper fino dorado a la manteca con jamón seleccionado y muzzarella fundida.",
+    "purposeEn": "Thin sandwich bread toasted in butter with premium ham and melted mozzarella.",
+    "available": true,
+    "stock": 20
+  },
+  {
+    "id": "dish_pizza_muzza",
+    "name": "Pizza Muzzarella Casera Grande",
+    "nameEn": "Large Homemade Mozzarella Pizza",
+    "description": "Masa artesanal esponjosa con salsa de tomate de la casa, abundante muzzarella derretida, aceitunas verdes y orégano.",
+    "descriptionEn": "Traditional large homemade crust pizza with rich tomato sauce, melted mozzarella, olives, and oregano.",
+    "price": 12000,
+    "category": "Platos Fuertes",
+    "image": "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&auto=format&fit=crop&q=80",
+    "tags": [
+      "Para Compartir",
+      "Artesanal"
+    ],
+    "purpose": "Masa fermentada en frío por 24 horas y horneada a alta temperatura para lograr máxima esponjosidad.",
+    "purposeEn": "Cold-fermented dough baked at high temperature for the perfect light and airy crust.",
+    "available": true,
+    "stock": 20
+  },
+  {
+    "id": "dish_empanada_criolla",
+    "name": "Empanada de Carne Criolla al Horno",
+    "nameEn": "Baked Beef Creole Empanada",
+    "description": "Empanada tradicional argentina cocida al horno, rellena de carne cortada a cuchillo sazonada con huevo, verdeo y especias.",
+    "descriptionEn": "Traditional baked Argentine empanada stuffed with spiced ground beef, egg, and green onions.",
+    "price": 1000,
+    "category": "Platos Fuertes",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/dishes/1783470657518_empanadas.jpg",
+    "tags": [
+      "Tradicional",
+      "Clásico"
+    ],
+    "purpose": "Repulgue tradicional artesanal y relleno súper jugoso con el auténtico sabor del norte argentino.",
+    "purposeEn": "Traditional hand-crimped pastry stuffed with a juicy, authentic Argentine beef filling.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "cover"
+  },
+  {
+    "id": "dish_1783471294688",
+    "name": "Pepas",
+    "description": "Pepas grandes",
+    "descriptionEn": "Large Pepas",
+    "price": 1000,
+    "category": "Platos Fuertes",
+    "image": "https://qzqgccdogvzkdudpsckd.supabase.co/storage/v1/object/public/platos/1783471290057_Categor_a__Galletitas_y_Snacks___P_gina_2___Arcor_en_Casa.jfif",
+    "tags": [
+      "Recomendado"
+    ],
+    "purpose": "La ofrenda de este plato apoya a los comedores sociales de la Iglesia.",
+    "purposeEn": "The offering for this dish supports the social soup kitchens of the Church.",
+    "available": true,
+    "stock": 20,
+    "imageFit": "cover"
+  }
+]

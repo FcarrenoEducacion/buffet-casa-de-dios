@@ -1,0 +1,6 @@
+{
+  "name": "Buffet Casa de Dios",
+  "description": "Carta interactiva de buffet con pedidos por QR, pago integrado, sistema de gestión para cocina en tiempo real y asistente IA de recomendación.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
