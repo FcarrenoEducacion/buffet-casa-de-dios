@@ -102,6 +102,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [totalQrInformed, setTotalQrInformed] = useState<string>('');
   const [totalCardInformed, setTotalCardInformed] = useState<string>('');
   const [closingNote, setClosingNote] = useState<string>('');
+  const [showDifferencesWarning, setShowDifferencesWarning] = useState<boolean>(false);
+  const [differencesDetails, setDifferencesDetails] = useState<any>(null);
 
   // Tab state for the admin section
   const [adminTab, setAdminTab] = useState<'caja' | 'menu' | 'qr' | 'supabase'>('caja');
@@ -374,23 +376,58 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleCloseSession = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCloseSession = async (e?: React.FormEvent, forceClose: boolean = false) => {
+    if (e) e.preventDefault();
     if (!closingResponsible.trim()) {
       alert("Por favor ingrese el nombre del responsable del cierre.");
       return;
     }
+
+    const expected_cash = currentSession?.expectedCash || 0;
+    const expected_transfer = currentSession?.totalTransfer || 0;
+    const expected_qr = currentSession?.totalQr || 0;
+    const expected_card = currentSession?.totalCard || 0;
+
+    const counted_cash = Number(countedCash) || 0;
+    const dec_transfer = Number(totalTransferInformed) || 0;
+    const dec_qr = Number(totalQrInformed) || 0;
+    const dec_card = Number(totalCardInformed) || 0;
+
+    const difference_cash = counted_cash - expected_cash;
+    const difference_transfer = dec_transfer - expected_transfer;
+    const difference_qr = dec_qr - expected_qr;
+    const difference_card = dec_card - expected_card;
+
+    const hasDiffs = difference_cash !== 0 || difference_transfer !== 0 || difference_qr !== 0 || difference_card !== 0;
+
+    if (hasDiffs && !forceClose) {
+      setDifferencesDetails({
+        cash: { expected: expected_cash, declared: counted_cash, diff: difference_cash },
+        transfer: { expected: expected_transfer, declared: dec_transfer, diff: difference_transfer },
+        qr: { expected: expected_qr, declared: dec_qr, diff: difference_qr },
+        card: { expected: expected_card, declared: dec_card, diff: difference_card }
+      });
+      setShowDifferencesWarning(true);
+      return;
+    }
+
+    if (hasDiffs && !closingNote.trim()) {
+      alert("Para cerrar la caja con diferencias, es obligatorio ingresar una observación justificando los motivos.");
+      return;
+    }
+
     try {
       const res = await fetch('/api/cash-session/close', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           closedBy: closingResponsible.trim(),
-          countedCash: Number(countedCash) || 0,
-          totalTransfer: Number(totalTransferInformed) || 0,
-          totalQr: Number(totalQrInformed) || 0,
-          totalCard: Number(totalCardInformed) || 0,
-          closingNote: closingNote.trim()
+          countedCash: counted_cash,
+          totalTransfer: dec_transfer,
+          totalQr: dec_qr,
+          totalCard: dec_card,
+          closingNote: closingNote.trim(),
+          closingResult: hasDiffs ? 'with_differences' : 'perfect'
         })
       });
       const data = await res.json();
@@ -405,6 +442,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }
         setCurrentSession(null);
         setIsClosingModalOpen(false);
+        setShowDifferencesWarning(false);
+        setDifferencesDetails(null);
         // Reset closure inputs
         setCountedCash('');
         setTotalTransferInformed('');
@@ -1501,45 +1540,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       doc.setTextColor(71, 85, 105);
 
       // Table layout for financials
-      const renderRow = (label: string, value: string, isBold = false) => {
-        if (isBold) {
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(15, 23, 42);
-        } else {
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(71, 85, 105);
+      doc.setFontSize(9);
+
+      // Draw a neat table header for the reconciliation
+      doc.setFillColor(241, 245, 249);
+      doc.rect(15, y, 180, 6, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(71, 85, 105);
+      doc.text("Medio de Pago", 18, y + 4.5);
+      doc.text("Esperado Sist", 80, y + 4.5, { align: 'right' });
+      doc.text("Declarado", 130, y + 4.5, { align: 'right' });
+      doc.text("Diferencia", 185, y + 4.5, { align: 'right' });
+      
+      y += 6;
+      doc.line(15, y, 195, y);
+
+      const renderReconciliationRow = (label: string, expected: number, declared: number, difference: number) => {
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        doc.text(label, 18, y + 5);
+        doc.text(`$${expected.toLocaleString('es-AR')}`, 80, y + 5, { align: 'right' });
+        
+        const declaredText = isClosed ? `$${declared.toLocaleString('es-AR')}` : "-";
+        doc.text(declaredText, 130, y + 5, { align: 'right' });
+        
+        let diffText = "-";
+        if (isClosed) {
+          if (difference === 0) {
+            diffText = "$0 (Coincide)";
+            doc.setTextColor(16, 124, 65); // Green
+          } else if (difference > 0) {
+            diffText = `+$${difference.toLocaleString('es-AR')} (Sobran)`;
+            doc.setTextColor(16, 124, 65); // Green
+          } else {
+            diffText = `-$${Math.abs(difference).toLocaleString('es-AR')} (Faltan)`;
+            doc.setTextColor(220, 38, 38); // Red
+          }
         }
-        doc.text(label, 15, y);
-        doc.text(value, 150, y, { align: 'right' });
-        doc.line(15, y + 2, 195, y + 2);
+        doc.text(diffText, 185, y + 5, { align: 'right' });
+        doc.line(15, y + 7, 195, y + 7);
         y += 7;
       };
 
-      renderRow("Fondo / Cambio Inicial de Apertura:", `$${s.openingAmount.toLocaleString('es-AR')} ARS`);
-      renderRow("Ventas en Efectivo Registradas:", `$${(s.totalCash || 0).toLocaleString('es-AR')} ARS`);
-      renderRow("Total Efectivo Esperado en Caja (Fondo + Ventas):", `$${(s.expectedCash || 0).toLocaleString('es-AR')} ARS`, true);
-      
+      renderReconciliationRow("Efectivo (Cajón)", s.expectedCash || 0, s.declaredCash || 0, s.difference || 0);
+      renderReconciliationRow("Transferencia", s.expectedTransfer || 0, s.declaredTransfer || 0, s.differenceTransfer || 0);
+      renderReconciliationRow("Código QR", s.expectedQr || 0, s.declaredQr || 0, s.differenceQr || 0);
+      renderReconciliationRow("Tarjeta", s.expectedCard || 0, s.declaredCard || 0, s.differenceCard || 0);
+
+      // Render total difference row
       if (isClosed) {
-        renderRow("Efectivo Fisico Contado (Informado por Cajera):", `$${(s.countedCash || 0).toLocaleString('es-AR')} ARS`);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text("CONCILIACION / DIFERENCIA TOTAL:", 18, y + 5);
         
-        const diff = s.difference || 0;
-        let diffText = `$${diff.toLocaleString('es-AR')} ARS`;
-        if (diff === 0) diffText += " (CIERRE PERFECTO)";
-        else if (diff > 0) diffText += " (SOBRANTE)";
-        else diffText += " (FALTANTE)";
-        
-        renderRow("Diferencia de Caja (Contado vs Esperado):", diffText, true);
-      } else {
-        renderRow("Efectivo Fisico Contado:", "N/A (Sesion de Caja aun Abierta)");
-        renderRow("Diferencia de Caja:", "N/A", true);
+        const totDiff = s.differenceTotal || 0;
+        let totText = "";
+        if (totDiff === 0) {
+          totText = "$0 (CIERRE PERFECTO)";
+          doc.setTextColor(16, 124, 65); // Green
+        } else if (totDiff > 0) {
+          totText = `+$${totDiff.toLocaleString('es-AR')} (SOBRANTE TOTAL)`;
+          doc.setTextColor(16, 124, 65); // Green
+        } else {
+          totText = `-$${Math.abs(totDiff).toLocaleString('es-AR')} (FALTANTE TOTAL)`;
+          doc.setTextColor(220, 38, 38); // Red
+        }
+        doc.text(totText, 185, y + 5, { align: 'right' });
+        doc.line(15, y + 7, 195, y + 7);
+        y += 7;
       }
 
-      y += 3;
-      renderRow("Ventas por Transferencia Bancaria:", `$${(s.totalTransfer || 0).toLocaleString('es-AR')} ARS`);
-      renderRow("Ventas por Codigo QR (MercadoPago):", `$${(s.totalQr || 0).toLocaleString('es-AR')} ARS`);
-      renderRow("Ventas por Tarjeta (Debito/Credito):", `$${(s.totalCard || 0).toLocaleString('es-AR')} ARS`);
-      renderRow("Monto Total Facturado en Ventas:", `$${(s.totalSales || 0).toLocaleString('es-AR')} ARS`, true);
-
+      // Render total sales
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text("Total Facturado de la Sesión:", 18, y + 5);
+      doc.text(`$${(s.totalSales || 0).toLocaleString('es-AR')} ARS`, 185, y + 5, { align: 'right' });
+      doc.line(15, y + 7, 195, y + 7);
       y += 10;
 
       // Section 3: Orders detail
@@ -3731,6 +3807,106 @@ CREATE TABLE IF NOT EXISTS cash_movements (
         </div>
       )}
 
+      {/* ADVERTENCIA DE DIFERENCIAS EN EL ARQUEO */}
+      {showDifferencesWarning && differencesDetails && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-y-auto animate-fade-in">
+          <div className="glass-card-heavy max-w-md w-full p-6 flex flex-col gap-5 text-white border border-rose-500/30 shadow-2xl shadow-rose-950/20" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 border-b border-white/15 pb-4">
+              <div className="bg-rose-500/15 p-2 rounded-xl text-rose-400">
+                <AlertTriangle className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-base text-rose-400">¡Hay diferencias en el arqueo!</h3>
+                <p className="text-[11px] text-white/60">Los montos declarados no coinciden con los esperados por el sistema.</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3.5 bg-black/40 p-4 rounded-2xl border border-white/5">
+              <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider font-mono">Detalle de Diferencias</span>
+              <div className="flex flex-col gap-2 text-xs">
+                {/* EFECTIVO */}
+                <div className="flex justify-between items-center bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-white font-medium">Efectivo:</span>
+                  <div className="text-right flex flex-col font-mono text-[11px]">
+                    <span className="text-white/60">Sist: ${differencesDetails.cash.expected.toLocaleString('es-AR')} • Decl: ${differencesDetails.cash.declared.toLocaleString('es-AR')}</span>
+                    <span className={`font-bold ${differencesDetails.cash.diff > 0 ? 'text-emerald-400' : differencesDetails.cash.diff < 0 ? 'text-rose-400' : 'text-white/60'}`}>
+                      {differencesDetails.cash.diff > 0 ? `+$${differencesDetails.cash.diff.toLocaleString('es-AR')} sobrante` : differencesDetails.cash.diff < 0 ? `-$${Math.abs(differencesDetails.cash.diff).toLocaleString('es-AR')} faltante` : '$0'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* TRANSFERENCIA */}
+                <div className="flex justify-between items-center bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-white font-medium">Transferencia:</span>
+                  <div className="text-right flex flex-col font-mono text-[11px]">
+                    <span className="text-white/60">Sist: ${differencesDetails.transfer.expected.toLocaleString('es-AR')} • Decl: ${differencesDetails.transfer.declared.toLocaleString('es-AR')}</span>
+                    <span className={`font-bold ${differencesDetails.transfer.diff > 0 ? 'text-emerald-400' : differencesDetails.transfer.diff < 0 ? 'text-rose-400' : 'text-white/60'}`}>
+                      {differencesDetails.transfer.diff > 0 ? `+$${differencesDetails.transfer.diff.toLocaleString('es-AR')} sobrante` : differencesDetails.transfer.diff < 0 ? `-$${Math.abs(differencesDetails.transfer.diff).toLocaleString('es-AR')} faltante` : '$0'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* QR */}
+                <div className="flex justify-between items-center bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-white font-medium">Código QR:</span>
+                  <div className="text-right flex flex-col font-mono text-[11px]">
+                    <span className="text-white/60">Sist: ${differencesDetails.qr.expected.toLocaleString('es-AR')} • Decl: ${differencesDetails.qr.declared.toLocaleString('es-AR')}</span>
+                    <span className={`font-bold ${differencesDetails.qr.diff > 0 ? 'text-emerald-400' : differencesDetails.qr.diff < 0 ? 'text-rose-400' : 'text-white/60'}`}>
+                      {differencesDetails.qr.diff > 0 ? `+$${differencesDetails.qr.diff.toLocaleString('es-AR')} sobrante` : differencesDetails.qr.diff < 0 ? `-$${Math.abs(differencesDetails.qr.diff).toLocaleString('es-AR')} faltante` : '$0'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* TARJETA */}
+                <div className="flex justify-between items-center bg-white/5 p-2 rounded-xl border border-white/5">
+                  <span className="text-white font-medium">Tarjeta:</span>
+                  <div className="text-right flex flex-col font-mono text-[11px]">
+                    <span className="text-white/60">Sist: ${differencesDetails.card.expected.toLocaleString('es-AR')} • Decl: ${differencesDetails.card.declared.toLocaleString('es-AR')}</span>
+                    <span className={`font-bold ${differencesDetails.card.diff > 0 ? 'text-emerald-400' : differencesDetails.card.diff < 0 ? 'text-rose-400' : 'text-white/60'}`}>
+                      {differencesDetails.card.diff > 0 ? `+$${differencesDetails.card.diff.toLocaleString('es-AR')} sobrante` : differencesDetails.card.diff < 0 ? `-$${Math.abs(differencesDetails.card.diff).toLocaleString('es-AR')} faltante` : '$0'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold text-rose-400">Observación Obligatoria (Explicar diferencia) *</label>
+              <textarea
+                required
+                placeholder="Por favor ingrese una observación explicando la diferencia..."
+                value={closingNote}
+                onChange={(e) => setClosingNote(e.target.value)}
+                className="bg-[#0f172a]/80 border border-rose-500/30 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 text-white min-h-[90px] font-medium"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <button
+                type="button"
+                onClick={() => setShowDifferencesWarning(false)}
+                className="bg-white/5 hover:bg-white/10 text-white/80 hover:text-white py-3 rounded-xl text-xs font-bold uppercase transition-all cursor-pointer border border-white/10 text-center"
+              >
+                Volver y corregir
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCloseSession(undefined, true)}
+                disabled={!closingNote.trim()}
+                className={`py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all text-center flex items-center justify-center gap-1 shadow-lg cursor-pointer ${
+                  closingNote.trim() 
+                    ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/10' 
+                    : 'bg-rose-950/40 text-white/30 border border-white/5 cursor-not-allowed'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Cerrar con diferencias</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 3. CARGAR PEDIDO MANUAL MODAL */}
       {isAddManualOrderOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm overflow-y-auto animate-fade-in">
@@ -3985,34 +4161,115 @@ CREATE TABLE IF NOT EXISTS cash_movements (
 
               {/* Financial Breakdown */}
               <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col gap-4">
-                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-display border-b border-white/5 pb-2">Arqueo y Desglose por Medio de Pago</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-white/40">Fondo Apertura:</span>
-                    <span className="font-extrabold text-white">${sessionReport.session.openingAmount.toLocaleString('es-AR')}</span>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-white/40">Ventas Efectivo:</span>
-                    <span className="font-extrabold text-white">${sessionReport.session.totalCash.toLocaleString('es-AR')}</span>
-                  </div>
-                  <div className="flex flex-col gap-0.5 col-span-2">
-                    <span className="text-emerald-400 font-bold">Total Efectivo Esperado:</span>
-                    <span className="font-black text-emerald-400">${sessionReport.session.expectedCash.toLocaleString('es-AR')}</span>
-                  </div>
+                <div className="flex justify-between items-center border-b border-white/15 pb-2.5">
+                  <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-display">Conciliación por Medio de Pago</h4>
                   {sessionReport.session.status === 'closed' && (
-                    <div className="flex flex-col gap-0.5 col-span-2 border-t border-white/10 pt-2">
-                      <span className="text-rose-400 font-bold">Contado Físico:</span>
-                      <span className="font-black text-rose-400">${sessionReport.session.countedCash.toLocaleString('es-AR')}</span>
-                    </div>
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      sessionReport.session.closingResult === 'perfect' 
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                        : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    }`}>
+                      {sessionReport.session.closingResult === 'perfect' ? '✓ Arqueo Coincidente' : '⚠️ Cerrado con Diferencias'}
+                    </span>
                   )}
-                  <div className="flex flex-col gap-0.5 border-t border-white/10 pt-2">
-                    <span className="text-blue-400">Transferencias:</span>
-                    <span className="font-bold text-white">${sessionReport.session.totalTransfer.toLocaleString('es-AR')}</span>
-                  </div>
-                  <div className="flex flex-col gap-0.5 border-t border-white/10 pt-2">
-                    <span className="text-purple-400">QR / MercadoPago:</span>
-                    <span className="font-bold text-white">${sessionReport.session.totalQr.toLocaleString('es-AR')}</span>
-                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/5 text-white/40 text-[10px] uppercase">
+                        <th className="py-2 font-medium text-left">Medio de Pago</th>
+                        <th className="py-2 text-right font-medium">Esperado Sist</th>
+                        <th className="py-2 text-right font-medium">Declarado</th>
+                        <th className="py-2 text-right font-medium">Diferencia</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {/* EFECTIVO */}
+                      <tr>
+                        <td className="py-2.5 text-white font-medium text-left">Efectivo (Cajón)</td>
+                        <td className="py-2.5 text-right text-white/80">${sessionReport.session.expectedCash.toLocaleString('es-AR')}</td>
+                        <td className="py-2.5 text-right text-white/80">
+                          {sessionReport.session.status === 'open' ? '-' : `$${sessionReport.session.declaredCash.toLocaleString('es-AR')}`}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          {sessionReport.session.status === 'open' ? (
+                            <span className="text-white/30">-</span>
+                          ) : (
+                            <span className={`font-bold ${sessionReport.session.difference > 0 ? 'text-emerald-400' : sessionReport.session.difference < 0 ? 'text-rose-400' : 'text-white/40'}`}>
+                              {sessionReport.session.difference > 0 ? `+$${sessionReport.session.difference.toLocaleString('es-AR')}` : sessionReport.session.difference < 0 ? `-$${Math.abs(sessionReport.session.difference).toLocaleString('es-AR')}` : '$0'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+
+                      {/* TRANSFERENCIA */}
+                      <tr>
+                        <td className="py-2.5 text-white font-medium text-left">Transferencia</td>
+                        <td className="py-2.5 text-right text-white/80">${sessionReport.session.expectedTransfer.toLocaleString('es-AR')}</td>
+                        <td className="py-2.5 text-right text-white/80">
+                          {sessionReport.session.status === 'open' ? '-' : `$${sessionReport.session.declaredTransfer.toLocaleString('es-AR')}`}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          {sessionReport.session.status === 'open' ? (
+                            <span className="text-white/30">-</span>
+                          ) : (
+                            <span className={`font-bold ${sessionReport.session.differenceTransfer > 0 ? 'text-emerald-400' : sessionReport.session.differenceTransfer < 0 ? 'text-rose-400' : 'text-white/40'}`}>
+                              {sessionReport.session.differenceTransfer > 0 ? `+$${sessionReport.session.differenceTransfer.toLocaleString('es-AR')}` : sessionReport.session.differenceTransfer < 0 ? `-$${Math.abs(sessionReport.session.differenceTransfer).toLocaleString('es-AR')}` : '$0'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+
+                      {/* QR */}
+                      <tr>
+                        <td className="py-2.5 text-white font-medium text-left">Código QR</td>
+                        <td className="py-2.5 text-right text-white/80">${sessionReport.session.expectedQr.toLocaleString('es-AR')}</td>
+                        <td className="py-2.5 text-right text-white/80">
+                          {sessionReport.session.status === 'open' ? '-' : `$${sessionReport.session.declaredQr.toLocaleString('es-AR')}`}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          {sessionReport.session.status === 'open' ? (
+                            <span className="text-white/30">-</span>
+                          ) : (
+                            <span className={`font-bold ${sessionReport.session.differenceQr > 0 ? 'text-emerald-400' : sessionReport.session.differenceQr < 0 ? 'text-rose-400' : 'text-white/40'}`}>
+                              {sessionReport.session.differenceQr > 0 ? `+$${sessionReport.session.differenceQr.toLocaleString('es-AR')}` : sessionReport.session.differenceQr < 0 ? `-$${Math.abs(sessionReport.session.differenceQr).toLocaleString('es-AR')}` : '$0'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+
+                      {/* TARJETA */}
+                      <tr>
+                        <td className="py-2.5 text-white font-medium text-left">Tarjeta</td>
+                        <td className="py-2.5 text-right text-white/80">${sessionReport.session.expectedCard.toLocaleString('es-AR')}</td>
+                        <td className="py-2.5 text-right text-white/80">
+                          {sessionReport.session.status === 'open' ? '-' : `$${sessionReport.session.declaredCard.toLocaleString('es-AR')}`}
+                        </td>
+                        <td className="py-2.5 text-right">
+                          {sessionReport.session.status === 'open' ? (
+                            <span className="text-white/30">-</span>
+                          ) : (
+                            <span className={`font-bold ${sessionReport.session.differenceCard > 0 ? 'text-emerald-400' : sessionReport.session.differenceCard < 0 ? 'text-rose-400' : 'text-white/40'}`}>
+                              {sessionReport.session.differenceCard > 0 ? `+$${sessionReport.session.differenceCard.toLocaleString('es-AR')}` : sessionReport.session.differenceCard < 0 ? `-$${Math.abs(sessionReport.session.differenceCard).toLocaleString('es-AR')}` : '$0'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    </tbody>
+                    {sessionReport.session.status === 'closed' && (
+                      <tfoot>
+                        <tr className="border-t border-white/10 font-black text-xs">
+                          <td className="py-3 text-amber-400 text-left">DIFERENCIA TOTAL</td>
+                          <td className="py-3 text-right text-white/40"></td>
+                          <td className="py-3 text-right text-white/40"></td>
+                          <td className={`py-3 text-right ${sessionReport.session.differenceTotal > 0 ? 'text-emerald-400' : sessionReport.session.differenceTotal < 0 ? 'text-rose-400' : 'text-white/40'}`}>
+                            {sessionReport.session.differenceTotal > 0 ? `+$${sessionReport.session.differenceTotal.toLocaleString('es-AR')}` : sessionReport.session.differenceTotal < 0 ? `-$${Math.abs(sessionReport.session.differenceTotal).toLocaleString('es-AR')}` : '$0'}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
                 </div>
               </div>
 

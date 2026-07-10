@@ -62,6 +62,17 @@ const ai = new GoogleGenAI({
 
 app.use(express.json({ limit: "10mb" }));
 
+// Normalize payment methods for consistency across the system
+function normalizePaymentMethod(method: string): string {
+  const m = String(method || "").toLowerCase().trim();
+  if (!m) return "efectivo";
+  if (m.includes("efec") || m.includes("cash")) return "efectivo";
+  if (m.includes("trans")) return "transferencia";
+  if (m.includes("qr") || m.includes("mercado")) return "qr";
+  if (m.includes("tarj") || m.includes("card")) return "tarjeta";
+  return "efectivo"; // Default fallback
+}
+
 // Files for persistence
 const DISHES_FILE = path.join(process.cwd(), "dishes.json");
 const CONFIG_FILE = path.join(process.cwd(), "config.json");
@@ -524,6 +535,21 @@ CREATE TABLE IF NOT EXISTS cash_sessions (
   expected_cash numeric DEFAULT 0,
   difference numeric DEFAULT 0,
   closing_note text,
+  
+  -- Campos de Arqueo Detallado por Medio de Pago
+  declared_cash numeric DEFAULT 0,
+  declared_transfer numeric DEFAULT 0,
+  declared_qr numeric DEFAULT 0,
+  declared_card numeric DEFAULT 0,
+  expected_transfer numeric DEFAULT 0,
+  expected_qr numeric DEFAULT 0,
+  expected_card numeric DEFAULT 0,
+  difference_transfer numeric DEFAULT 0,
+  difference_qr numeric DEFAULT 0,
+  difference_card numeric DEFAULT 0,
+  difference_total numeric DEFAULT 0,
+  closing_result text,
+
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -1249,7 +1275,21 @@ function mapDbToSession(row: any): any {
     difference: rawDiff !== null && rawDiff !== undefined ? Number(rawDiff) : undefined,
     closingNote: row.closing_note || "",
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+
+    // New Fields
+    declaredCash: row.declared_cash !== undefined && row.declared_cash !== null ? Number(row.declared_cash) : (row.counted_cash !== null && row.counted_cash !== undefined ? Number(row.counted_cash) : 0),
+    declaredTransfer: Number(row.declared_transfer || 0),
+    declaredQr: Number(row.declared_qr || 0),
+    declaredCard: Number(row.declared_card || 0),
+    expectedTransfer: Number(row.expected_transfer || 0),
+    expectedQr: Number(row.expected_qr || 0),
+    expectedCard: Number(row.expected_card || 0),
+    differenceTransfer: Number(row.difference_transfer || 0),
+    differenceQr: Number(row.difference_qr || 0),
+    differenceCard: Number(row.difference_card || 0),
+    differenceTotal: Number(row.difference_total || 0),
+    closingResult: row.closing_result || null
   };
 }
 
@@ -1274,7 +1314,21 @@ function mapSessionToDb(session: any): any {
     difference_cash: session.difference !== undefined ? Number(session.difference) : null,
     closing_note: session.closingNote || null,
     created_at: session.createdAt || new Date().toISOString(),
-    updated_at: session.updatedAt || new Date().toISOString()
+    updated_at: session.updatedAt || new Date().toISOString(),
+
+    // New Fields
+    declared_cash: Number(session.declaredCash !== undefined ? session.declaredCash : (session.countedCash || 0)),
+    declared_transfer: Number(session.declaredTransfer || 0),
+    declared_qr: Number(session.declaredQr || 0),
+    declared_card: Number(session.declaredCard || 0),
+    expected_transfer: Number(session.expectedTransfer || 0),
+    expected_qr: Number(session.expectedQr || 0),
+    expected_card: Number(session.expectedCard || 0),
+    difference_transfer: Number(session.differenceTransfer || 0),
+    difference_qr: Number(session.differenceQr || 0),
+    difference_card: Number(session.differenceCard || 0),
+    difference_total: Number(session.differenceTotal || 0),
+    closing_result: session.closingResult || null
   };
 }
 
@@ -2116,7 +2170,7 @@ app.post("/api/cash-session/open", async (req, res) => {
 
 // POST /api/cash-session/close
 app.post("/api/cash-session/close", async (req, res) => {
-  const { closedBy, countedCash, totalTransfer, totalQr, totalCard, closingNote } = req.body;
+  const { closedBy, countedCash, totalTransfer, totalQr, totalCard, closingNote, closingResult: clientClosingResult } = req.body;
   if (!closedBy) {
     return res.status(400).json({ error: "Debe especificar el nombre del responsable del cierre." });
   }
@@ -2214,26 +2268,24 @@ app.post("/api/cash-session/close", async (req, res) => {
   }
 
   // Calculate
-  let totalCash = 0;
-  let finalTotalTransfer = 0;
-  let finalTotalQr = 0;
-  let finalTotalCard = 0;
+  let totalCash = 0; // expected cash from sales
+  let expected_transfer = 0;
+  let expected_qr = 0;
+  let expected_card = 0;
   let totalSales = 0;
 
   sessionOrders.forEach(o => {
     const amount = o.total || 0;
     totalSales += amount;
-    const method = String(o.paymentMethod || "").toLowerCase();
-    if (method === 'efectivo' || method === 'efectivo_caja') {
+    const method = normalizePaymentMethod(o.paymentMethod);
+    if (method === 'efectivo') {
       totalCash += amount;
-    } else if (method === 'transferencia' || method === 'pago_movil') {
-      finalTotalTransfer += amount;
-    } else if (method === 'qr' || method === 'qr_caja') {
-      finalTotalQr += amount;
-    } else if (method === 'tarjeta' || method === 'tarjeta_caja' || method === 'simulado_tarjeta') {
-      finalTotalCard += amount;
-    } else {
-      totalCash += amount;
+    } else if (method === 'transferencia') {
+      expected_transfer += amount;
+    } else if (method === 'qr') {
+      expected_qr += amount;
+    } else if (method === 'tarjeta') {
+      expected_card += amount;
     }
   });
 
@@ -2249,7 +2301,30 @@ app.post("/api/cash-session/close", async (req, res) => {
 
   const finalExpectedCash = expectedCash;
   const finalCountedCash = Number(countedCash) || 0;
-  const difference = finalCountedCash - finalExpectedCash;
+  const difference_cash = finalCountedCash - finalExpectedCash;
+
+  const finalTotalTransfer = Number(totalTransfer) || 0;
+  const finalTotalQr = Number(totalQr) || 0;
+  const finalTotalCard = Number(totalCard) || 0;
+
+  const difference_transfer = finalTotalTransfer - expected_transfer;
+  const difference_qr = finalTotalQr - expected_qr;
+  const difference_card = finalTotalCard - expected_card;
+  const difference_total = difference_cash + difference_transfer + difference_qr + difference_card;
+
+  // Classify overall result
+  const diffs = [difference_cash, difference_transfer, difference_qr, difference_card];
+  const hasNegative = diffs.some(d => d < 0);
+  const hasPositive = diffs.some(d => d > 0);
+
+  let closingResult = "perfect";
+  if (hasPositive && hasNegative) {
+    closingResult = "mixed";
+  } else if (hasNegative) {
+    closingResult = "deficit";
+  } else if (hasPositive) {
+    closingResult = "surplus";
+  }
 
   const closedSession = {
     ...current,
@@ -2257,15 +2332,29 @@ app.post("/api/cash-session/close", async (req, res) => {
     closedBy,
     closedAt: new Date().toISOString(),
     countedCash: finalCountedCash,
-    totalTransfer: Number(totalTransfer) || finalTotalTransfer,
-    totalQr: Number(totalQr) || finalTotalQr,
-    totalCard: Number(totalCard) || finalTotalCard,
+    totalTransfer: finalTotalTransfer,
+    totalQr: finalTotalQr,
+    totalCard: finalTotalCard,
     totalCash,
     expectedCash: finalExpectedCash,
     totalSales,
-    difference,
+    difference: difference_cash,
     closingNote: closingNote || "",
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+
+    // New Fields
+    declaredCash: finalCountedCash,
+    declaredTransfer: finalTotalTransfer,
+    declaredQr: finalTotalQr,
+    declaredCard: finalTotalCard,
+    expectedTransfer: expected_transfer,
+    expectedQr: expected_qr,
+    expectedCard: expected_card,
+    differenceTransfer: difference_transfer,
+    differenceQr: difference_qr,
+    differenceCard: difference_card,
+    differenceTotal: difference_total,
+    closingResult: clientClosingResult || closingResult
   };
 
   // Save locally
@@ -2283,7 +2372,7 @@ app.post("/api/cash-session/close", async (req, res) => {
     cashSessionId: current.id,
     type: "closing",
     amount: finalCountedCash,
-    description: `Cierre de Caja. Diferencia: ${difference >= 0 ? '+' : ''}${difference}`,
+    description: `Cierre de Caja. Resultado: ${closingResult.toUpperCase()}. Dif Total: ${difference_total >= 0 ? '+' : ''}${difference_total}`,
     createdBy: closedBy,
     createdAt: new Date().toISOString()
   };
@@ -2386,52 +2475,95 @@ app.get("/api/cash-session/:id/report", async (req, res) => {
   }
 
   // Recalculate session statistics (same logic for consistency)
-  let totalCash = 0;
-  let totalTransfer = 0;
-  let totalQr = 0;
-  let totalCard = 0;
-  let totalSales = 0;
+  let totalCash_sales = 0;
+  let expected_transfer = 0;
+  let expected_qr = 0;
+  let expected_card = 0;
+  let totalSales_calc = 0;
 
   sessionOrders.filter(o => o.paymentStatus === 'pagado').forEach(o => {
     const amount = o.total || 0;
-    totalSales += amount;
-    const method = String(o.paymentMethod || "").toLowerCase();
-    if (method === 'efectivo' || method === 'efectivo_caja') {
-      totalCash += amount;
-    } else if (method === 'transferencia' || method === 'pago_movil') {
-      totalTransfer += amount;
-    } else if (method === 'qr' || method === 'qr_caja') {
-      totalQr += amount;
-    } else if (method === 'tarjeta' || method === 'tarjeta_caja' || method === 'simulado_tarjeta') {
-      totalCard += amount;
-    } else {
-      totalCash += amount;
+    totalSales_calc += amount;
+    const method = normalizePaymentMethod(o.paymentMethod);
+    if (method === 'efectivo') {
+      totalCash_sales += amount;
+    } else if (method === 'transferencia') {
+      expected_transfer += amount;
+    } else if (method === 'qr') {
+      expected_qr += amount;
+    } else if (method === 'tarjeta') {
+      expected_card += amount;
     }
   });
 
-  let expectedCash = session.openingAmount;
+  let expectedCash_calc = session.openingAmount;
   sessionMovements.forEach(m => {
     if (m.type === 'adjustment') {
-      expectedCash += m.amount;
+      expectedCash_calc += m.amount;
     } else if (m.type === 'refund') {
-      expectedCash -= m.amount;
+      expectedCash_calc -= m.amount;
     }
   });
-  expectedCash += totalCash;
+  expectedCash_calc += totalCash_sales;
 
-  const difference = session.status === 'closed' 
-    ? (session.countedCash || 0) - expectedCash
-    : undefined;
+  // Populate fields with fallback for older closed sessions
+  const isClosed = session.status === 'closed';
+
+  const declaredCash = isClosed ? (session.declaredCash !== undefined && session.declaredCash !== null ? session.declaredCash : (session.countedCash || 0)) : 0;
+  const declaredTransfer = isClosed ? (session.declaredTransfer || 0) : 0;
+  const declaredQr = isClosed ? (session.declaredQr || 0) : 0;
+  const declaredCard = isClosed ? (session.declaredCard || 0) : 0;
+
+  const expTransfer = isClosed ? (session.expectedTransfer !== undefined && session.expectedTransfer !== null ? session.expectedTransfer : expected_transfer) : expected_transfer;
+  const expQr = isClosed ? (session.expectedQr !== undefined && session.expectedQr !== null ? session.expectedQr : expected_qr) : expected_qr;
+  const expCard = isClosed ? (session.expectedCard !== undefined && session.expectedCard !== null ? session.expectedCard : expected_card) : expected_card;
+  const expCash = isClosed ? (session.expectedCash !== undefined && session.expectedCash !== null ? session.expectedCash : expectedCash_calc) : expectedCash_calc;
+
+  const diffCash = isClosed ? (session.difference !== undefined && session.difference !== null ? session.difference : (declaredCash - expCash)) : undefined;
+  const diffTransfer = isClosed ? (session.differenceTransfer !== undefined && session.differenceTransfer !== null ? session.differenceTransfer : (declaredTransfer - expTransfer)) : undefined;
+  const diffQr = isClosed ? (session.differenceQr !== undefined && session.differenceQr !== null ? session.differenceQr : (declaredQr - expQr)) : undefined;
+  const diffCard = isClosed ? (session.differenceCard !== undefined && session.differenceCard !== null ? session.differenceCard : (declaredCard - expCard)) : undefined;
+  const diffTotal = isClosed ? (session.differenceTotal !== undefined && session.differenceTotal !== null ? session.differenceTotal : ((diffCash || 0) + (diffTransfer || 0) + (diffQr || 0) + (diffCard || 0))) : undefined;
+
+  let closingResult = session.closingResult;
+  if (isClosed && !closingResult) {
+    const diffs = [diffCash || 0, diffTransfer || 0, diffQr || 0, diffCard || 0];
+    const hasNegative = diffs.some(d => d < 0);
+    const hasPositive = diffs.some(d => d > 0);
+    if (hasPositive && hasNegative) {
+      closingResult = "mixed";
+    } else if (hasNegative) {
+      closingResult = "deficit";
+    } else if (hasPositive) {
+      closingResult = "surplus";
+    } else {
+      closingResult = "perfect";
+    }
+  }
 
   const calculated = {
     ...session,
-    totalCash,
-    totalTransfer: session.status === 'closed' ? session.totalTransfer : totalTransfer,
-    totalQr: session.status === 'closed' ? session.totalQr : totalQr,
-    totalCard: session.status === 'closed' ? session.totalCard : totalCard,
-    totalSales: session.status === 'closed' ? session.totalSales : totalSales,
-    expectedCash: session.status === 'closed' ? session.expectedCash : expectedCash,
-    difference: session.status === 'closed' ? session.difference : difference
+    totalCash: totalCash_sales,
+    totalTransfer: isClosed ? (session.totalTransfer !== undefined ? session.totalTransfer : expTransfer) : expTransfer,
+    totalQr: isClosed ? (session.totalQr !== undefined ? session.totalQr : expQr) : expQr,
+    totalCard: isClosed ? (session.totalCard !== undefined ? session.totalCard : expCard) : expCard,
+    totalSales: isClosed ? session.totalSales : totalSales_calc,
+    expectedCash: expCash,
+    difference: diffCash,
+
+    // New Fields
+    declaredCash,
+    declaredTransfer,
+    declaredQr,
+    declaredCard,
+    expectedTransfer: expTransfer,
+    expectedQr: expQr,
+    expectedCard: expCard,
+    differenceTransfer: diffTransfer,
+    differenceQr: diffQr,
+    differenceCard: diffCard,
+    differenceTotal: diffTotal,
+    closingResult: isClosed ? closingResult : "open"
   };
 
   res.json({
