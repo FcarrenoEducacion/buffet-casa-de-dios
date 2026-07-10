@@ -333,31 +333,24 @@ function loadDishes(): any[] {
 
 let cachedConfig = { exchangeRate: 1000 };
 
-// Initialize cachedConfig from local file on startup
+// Initialize cachedConfig from local file on startup as a fallback
 try {
   if (fs.existsSync(CONFIG_FILE)) {
     const data = fs.readFileSync(CONFIG_FILE, "utf-8");
     cachedConfig = JSON.parse(data);
-  } else {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cachedConfig, null, 2), "utf-8");
   }
 } catch (e) {
   console.error("Error loading initial config.json:", e);
 }
 
-// Helper to save config locally
+// Helper to save config locally (strictly in-memory during execution)
 function saveConfigLocal(config: any) {
-  try {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Error saving config.json:", e);
-  }
+  cachedConfig = { ...cachedConfig, ...config };
 }
 
 // Helper to save config (Legacy synchronous wrapper & background sync)
 function saveConfig(config: any) {
-  cachedConfig = { ...cachedConfig, ...config };
-  saveConfigLocal(cachedConfig);
+  saveConfigLocal(config);
   if (supabase && isSupabaseActive) {
     (async () => {
       try {
@@ -3244,3 +3237,4 @@ async function startServer() {
 startServer();
 
 export { app };
+export default app;

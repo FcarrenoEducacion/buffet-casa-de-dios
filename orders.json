@@ -1,58 +1,18 @@
 [
   {
-    "id": "OP-4870",
-    "tableNumber": "6",
-    "items": [
-      {
-        "dishId": "dish_bagley_kesitas",
-        "menuItemId": "dish_bagley_kesitas",
-        "name": "Galletitas Kesitas Bagley",
-        "price": 1800,
-        "priceArs": 1800,
-        "quantity": 1,
-        "subtotalArs": 1800
-      }
-    ],
-    "total": 1800,
-    "totalArs": 1800,
-    "totalUsd": 1.188118811881188,
+    "id": "OP-TEST",
+    "tableNumber": "2",
+    "items": [],
+    "total": 1000,
+    "totalArs": 1000,
+    "totalUsd": 1,
     "status": "recibido",
-    "createdAt": "2026-07-10T14:25:00.969+00:00",
-    "updatedAt": "2026-07-10T14:25:00.969+00:00",
-    "customerName": "pepito",
+    "createdAt": "2026-07-09T22:58:22.792804+00:00",
+    "updatedAt": "2026-07-09T22:58:22.792804+00:00",
+    "customerName": "Test",
     "paymentMethod": "efectivo_caja",
     "paymentStatus": "pendiente",
-    "source": "qr_customer",
-    "cashSessionId": "31e53b48-db80-4888-bd96-2fb5c2cdcab6"
-  },
-  {
-    "id": "OP-2168",
-    "tableNumber": "7",
-    "items": [
-      {
-        "dishId": "dish_bagley_rex",
-        "menuItemId": "dish_bagley_rex",
-        "name": "Galletitas Rex Saladas Bagley",
-        "price": 1800,
-        "priceArs": 1800,
-        "quantity": 2,
-        "subtotalArs": 3600
-      }
-    ],
-    "total": 3600,
-    "totalArs": 3600,
-    "totalUsd": 2.376237623762376,
-    "status": "entregado",
-    "createdAt": "2026-07-10T12:50:26.293+00:00",
-    "updatedAt": "2026-07-10T13:19:40.548+00:00",
-    "customerName": "PEdro",
-    "paymentMethod": "efectivo",
-    "paymentStatus": "pagado",
-    "source": "qr_customer",
-    "cashierName": "Rita",
-    "cashSessionId": "8c840cfb-0638-4375-b521-77d0e0043123",
-    "paidAt": "2026-07-10T13:19:26.551+00:00",
-    "approvedAt": "2026-07-10T13:19:26.551+00:00"
+    "source": "qr_customer"
   },
   {
     "id": "OP-3333",
@@ -78,7 +38,6 @@
     "paymentMethod": "efectivo_caja",
     "paymentStatus": "pagado",
     "source": "qr_customer",
-    "cashSessionId": "8c840cfb-0638-4375-b521-77d0e0043123",
     "paidAt": "2026-07-09T22:49:18.296+00:00"
   }
 ]
