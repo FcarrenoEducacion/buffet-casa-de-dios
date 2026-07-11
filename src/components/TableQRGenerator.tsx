@@ -15,7 +15,10 @@ interface TableQRGeneratorProps {
 export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) => {
   const [selectedTable, setSelectedTable] = useState<number>(1);
   const [exporting, setExporting] = useState<boolean>(false);
+  const [qrVersion, setQrVersion] = useState<number>(Date.now());
+
   const cardRef = useRef<HTMLDivElement>(null);
+  const qrImgRef = useRef<HTMLImageElement>(null);
 
   const totalTables = 12;
 
@@ -44,14 +47,45 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
     return getTableUrl(selectedTable);
   }, [selectedTable, appUrl]);
 
+  const getQrImageUrl = (tableNumber: number, version: number) => {
+    const tableUrl = getTableUrl(tableNumber);
+
+    return `https://api.qrserver.com/v1/create-qr-code/?size=420x420&color=0d1e36&bgcolor=ffffff&margin=12&data=${encodeURIComponent(
+      tableUrl
+    )}&v=${version}`;
+  };
+
   const qrImageUrl = useMemo(() => {
-    return `https://api.qrserver.com/v1/create-qr-code/?size=320x320&color=0d1e36&bgcolor=ffffff&margin=10&data=${encodeURIComponent(
-      selectedTableUrl
-    )}`;
-  }, [selectedTableUrl]);
+    return getQrImageUrl(selectedTable, qrVersion);
+  }, [selectedTable, qrVersion, appUrl]);
+
+  const waitForQrImageToLoad = async () => {
+    const img = qrImgRef.current;
+
+    if (!img) return;
+
+    if (img.complete && img.naturalWidth > 0) return;
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        resolve();
+      }, 3000);
+
+      img.onload = () => {
+        window.clearTimeout(timeout);
+        resolve();
+      };
+
+      img.onerror = () => {
+        window.clearTimeout(timeout);
+        reject(new Error("No se pudo cargar el QR actualizado."));
+      };
+    });
+  };
 
   const handleSelectTable = (tableNumber: number) => {
     setSelectedTable(tableNumber);
+    setQrVersion(Date.now());
   };
 
   const handleDownloadPng = async () => {
@@ -60,7 +94,12 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
     setExporting(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      const freshVersion = Date.now();
+
+      setQrVersion(freshVersion);
+
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await waitForQrImageToLoad();
 
       const dataUrl = await toPng(cardRef.current, {
         pixelRatio: 3,
@@ -178,12 +217,12 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
             {exporting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Generando PNG...</span>
+                <span>Generando PNG Mesa {selectedTable}...</span>
               </>
             ) : (
               <>
                 <Download className="w-4 h-4" />
-                <span>Descargar Tarjeta de Mesa {selectedTable} PNG</span>
+                <span>Descargar Tarjeta Mesa {selectedTable} PNG</span>
               </>
             )}
           </button>
@@ -207,7 +246,7 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
         <div
           ref={cardRef}
           id="printable-table-card"
-          key={`printable-card-mesa-${selectedTable}`}
+          key={`printable-card-mesa-${selectedTable}-${qrVersion}`}
           className="bg-[#0c1222] border-4 border-amber-400 rounded-3xl p-6 shadow-xl max-w-sm w-full flex flex-col items-center gap-5 text-center relative overflow-hidden text-white"
         >
           <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-amber-400 translate-x-1.5 translate-y-1.5" />
@@ -240,7 +279,8 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
 
           <div className="p-3 bg-white border border-white/10 rounded-2xl flex flex-col items-center gap-2">
             <img
-              key={`qr-img-mesa-${selectedTable}`}
+              ref={qrImgRef}
+              key={`qr-img-mesa-${selectedTable}-${qrVersion}`}
               src={qrImageUrl}
               alt={`QR Mesa ${selectedTable}`}
               className="w-44 h-44 object-contain rounded-xl bg-white shadow-inner"

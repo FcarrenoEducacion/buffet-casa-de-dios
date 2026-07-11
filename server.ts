@@ -61,15 +61,63 @@ const ai = new GoogleGenAI({
 });
 
 app.use(express.json({ limit: "10mb" }));
+function normalizePaymentMethod(method: any): "efectivo" | "transferencia" | "qr" | "tarjeta" {
+  const raw = String(method || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (
+    raw === "efectivo" ||
+    raw === "efectivo_caja" ||
+    raw.includes("efectivo") ||
+    raw.includes("cash")
+  ) {
+    return "efectivo";
+  }
+
+  if (
+    raw === "transferencia" ||
+    raw === "pago_movil" ||
+    raw.includes("transfer") ||
+    raw.includes("banc") ||
+    raw.includes("movil")
+  ) {
+    return "transferencia";
+  }
+
+  if (
+    raw === "qr" ||
+    raw === "qr_caja" ||
+    raw.includes("mercadopago") ||
+    raw.includes("mercado pago") ||
+    raw.includes("codigo qr") ||
+    raw.includes("qr")
+  ) {
+    return "qr";
+  }
+
+  if (
+    raw === "tarjeta" ||
+    raw === "tarjeta_caja" ||
+    raw.includes("card") ||
+    raw.includes("posnet") ||
+    raw.includes("credito") ||
+    raw.includes("debito")
+  ) {
+    return "tarjeta";
+  }
+
+  return "efectivo";
+}
 
 // Files for persistence
 const DISHES_FILE = path.join(process.cwd(), "dishes.json");
 const CONFIG_FILE = path.join(process.cwd(), "config.json");
-const canWriteLocalFiles = !process.env.VERCEL;
 
 // Helper to save dishes
 function saveDishes(dishesList: any[]) {
-  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(DISHES_FILE, JSON.stringify(dishesList, null, 2), "utf-8");
   } catch (e) {
@@ -620,7 +668,6 @@ const MOVEMENTS_FILE = path.join(process.cwd(), "cash_movements.json");
 
 // Helper functions for file-based state saving and loading
 function saveOrders(ordersList: any[]) {
-  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(ORDERS_FILE, JSON.stringify(ordersList, null, 2), "utf-8");
   } catch (e) {
@@ -640,7 +687,6 @@ function loadSessions(): any[] {
 }
 
 function saveSessions(sessionsList: any[]) {
-  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsList, null, 2), "utf-8");
   } catch (e) {
@@ -660,7 +706,6 @@ function loadMovements(): any[] {
 }
 
 function saveMovements(movementsList: any[]) {
-  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(MOVEMENTS_FILE, JSON.stringify(movementsList, null, 2), "utf-8");
   } catch (e) {
@@ -1245,98 +1290,23 @@ const handleImageUploadRequest = async (req: express.Request, res: express.Respo
 
 app.post("/api/upload", handleImageUploadRequest);
 app.post("/api/upload-image", handleImageUploadRequest);
-function normalizePaymentMethod(method: any): "efectivo" | "transferencia" | "qr" | "tarjeta" {
-  const raw = String(method || "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
 
-  if (
-    raw === "efectivo" ||
-    raw === "efectivo_caja" ||
-    raw.includes("efectivo") ||
-    raw.includes("cash")
-  ) {
-    return "efectivo";
-  }
-
-  if (
-    raw === "transferencia" ||
-    raw === "pago_movil" ||
-    raw.includes("transfer") ||
-    raw.includes("banc")
-  ) {
-    return "transferencia";
-  }
-
-  if (
-    raw === "qr" ||
-    raw === "qr_caja" ||
-    raw.includes("mercadopago") ||
-    raw.includes("mercado pago") ||
-    raw.includes("codigo qr") ||
-    raw.includes("código qr")
-  ) {
-    return "qr";
-  }
-
-  if (
-    raw === "tarjeta" ||
-    raw === "tarjeta_caja" ||
-    raw === "simulado_tarjeta" ||
-    raw.includes("card") ||
-    raw.includes("posnet") ||
-    raw.includes("credito") ||
-    raw.includes("debito") ||
-    raw.includes("crédito") ||
-    raw.includes("débito")
-  ) {
-    return "tarjeta";
-  }
-
-  return "efectivo";
-}
-
-async function getOpenCashSession(preferredSessionId?: string | null): Promise<any | null> {
-  const normalizeSessionStatus = (status: any) => String(status || "").trim().toLowerCase();
-  const openStatuses = ["open", "abierta", "activo", "activa", "active"];
-
+async function getOpenCashSession(): Promise<any | null> {
   if (supabase) {
     try {
-      if (preferredSessionId) {
-        const { data, error } = await supabase
-          .from("cash_sessions")
-          .select("*")
-          .eq("id", preferredSessionId)
-          .limit(1);
-
-        if (!error && data && data.length > 0) {
-          const candidate = mapDbToSession(data[0]);
-          if (openStatuses.includes(normalizeSessionStatus(candidate.status))) {
-            return candidate;
-          }
-        } else if (error) {
-          console.error("[OPEN CASH SESSION] Error buscando sesión preferida:", error.message);
-        }
-      }
-
       const { data, error } = await supabase
         .from("cash_sessions")
         .select("*")
+        .eq("status", "open")
         .order("opened_at", { ascending: false })
-        .limit(10);
+        .limit(1);
 
       if (error) {
         console.error("[OPEN CASH SESSION] Error Supabase:", error.message);
       }
 
       if (!error && data && data.length > 0) {
-        const openRow = data.find((row: any) => openStatuses.includes(normalizeSessionStatus(row.status)));
-        if (openRow) {
-          return mapDbToSession(openRow);
-        }
-        console.warn("[OPEN CASH SESSION] Se encontraron sesiones, pero ninguna está abierta:", data.map((row: any) => ({ id: row.id, status: row.status })));
+        return mapDbToSession(data[0]);
       }
     } catch (err: any) {
       console.error("[OPEN CASH SESSION] Error inesperado:", err.message || err);
@@ -1345,11 +1315,7 @@ async function getOpenCashSession(preferredSessionId?: string | null): Promise<a
 
   try {
     const sessions = loadSessions();
-    if (preferredSessionId) {
-      const preferred = sessions.find((s: any) => s.id === preferredSessionId && openStatuses.includes(normalizeSessionStatus(s.status)));
-      if (preferred) return preferred;
-    }
-    return sessions.find((s: any) => openStatuses.includes(normalizeSessionStatus(s.status))) || null;
+    return sessions.find((s: any) => s.status === "open") || null;
   } catch (err) {
     console.error("[OPEN CASH SESSION] Error local:", err);
     return null;
@@ -1393,8 +1359,7 @@ function mapDbToSession(row: any): any {
     differenceQr: Number(row.difference_qr || 0),
     differenceCard: Number(row.difference_card || 0),
     differenceTotal: Number(row.difference_total || 0),
-    closingResult: row.closing_result || null,
-    authorizedBy: row.authorized_by || null
+    closingResult: row.closing_result || null
   };
 }
 
@@ -1433,8 +1398,7 @@ function mapSessionToDb(session: any): any {
     difference_qr: Number(session.differenceQr || 0),
     difference_card: Number(session.differenceCard || 0),
     difference_total: Number(session.differenceTotal || 0),
-    closing_result: session.closingResult || null,
-    authorized_by: session.authorizedBy || null
+    closing_result: session.closingResult || null
   };
 }
 
@@ -1518,8 +1482,6 @@ function mapDbToOrder(row: any, dbItems: any[] = []): any {
   let mappedPaymentStatus = "pendiente";
   if (row.payment_status === "paid" || row.payment_status === "pagado") {
     mappedPaymentStatus = "pagado";
-  } else if (row.payment_status === "cancelled" || row.payment_status === "cancelado") {
-    mappedPaymentStatus = "cancelado";
   } else if (row.payment_status === "pending" || row.payment_status === "pendiente") {
     mappedPaymentStatus = "pendiente";
   }
@@ -1538,8 +1500,6 @@ function mapDbToOrder(row: any, dbItems: any[] = []): any {
     mappedStatus = "listo";
   } else if (row.status === "delivered") {
     mappedStatus = "entregado";
-  } else if (row.status === "dismissed" || row.status === "cancelled" || row.status === "desestimado") {
-    mappedStatus = "desestimado";
   } else {
     mappedStatus = row.status || "recibido";
   }
@@ -1563,11 +1523,6 @@ function mapDbToOrder(row: any, dbItems: any[] = []): any {
     cashSessionId: row.cash_session_id || undefined,
     paidAt: row.paid_at || undefined,
     approvedAt: row.approved_at || undefined,
-    dismissedAt: row.dismissed_at || undefined,
-    dismissedBy: row.dismissed_by || undefined,
-    dismissedReason: row.dismissed_reason || undefined,
-    hasCreditNote: Boolean(row.has_credit_note || false),
-    creditNoteAmount: Number(row.credit_note_amount || 0),
     notes: row.notes || undefined
   };
 }
@@ -1579,8 +1534,6 @@ function mapOrderToDb(order: any): any {
   let dbPaymentStatus = "pending";
   if (order.paymentStatus === "pagado" || order.paymentStatus === "paid") {
     dbPaymentStatus = "paid";
-  } else if (order.paymentStatus === "cancelado" || order.paymentStatus === "cancelled") {
-    dbPaymentStatus = "cancelled";
   } else if (order.paymentStatus === "pendiente" || order.paymentStatus === "pending") {
     dbPaymentStatus = "pending";
   }
@@ -1589,8 +1542,6 @@ function mapOrderToDb(order: any): any {
   let dbStatus = "pending_payment";
   if (dbPaymentStatus === "pending") {
     dbStatus = "pending_payment";
-  } else if (dbPaymentStatus === "cancelled" || order.status === "desestimado" || order.status === "dismissed") {
-    dbStatus = "dismissed";
   } else {
     if (order.status === "recibido" || order.status === "approved") {
       dbStatus = "approved";
@@ -1621,12 +1572,7 @@ function mapOrderToDb(order: any): any {
     updated_at: order.updatedAt || new Date().toISOString(),
     paid_at: order.paidAt || null,
     approved_at: order.approvedAt || null,
-    cashier_name: order.cashierName || null,
-    dismissed_at: order.dismissedAt || null,
-    dismissed_by: order.dismissedBy || null,
-    dismissed_reason: order.dismissedReason || null,
-    has_credit_note: Boolean(order.hasCreditNote || false),
-    credit_note_amount: Number(order.creditNoteAmount || 0)
+    cashier_name: order.cashierName || null
   };
 }
 
@@ -1649,229 +1595,6 @@ function mapOrderItemToDb(orderId: string, item: any): any {
     created_at: new Date().toISOString()
   };
 }
-
-function isPaidOrder(order: any): boolean {
-  const paymentStatus = String(order?.paymentStatus || order?.payment_status || "").toLowerCase();
-  return paymentStatus === "pagado" || paymentStatus === "paid";
-}
-
-function isCancelledOrder(order: any): boolean {
-  const status = String(order?.status || "").toLowerCase();
-  const paymentStatus = String(order?.paymentStatus || order?.payment_status || "").toLowerCase();
-  return ["cancelado", "cancelled", "desestimado", "dismissed", "voided", "anulado"].includes(status) ||
-    ["cancelado", "cancelled", "voided"].includes(paymentStatus);
-}
-
-function getOrderTotal(order: any): number {
-  return Number(order?.totalArs ?? order?.total_ars ?? order?.total ?? 0) || 0;
-}
-
-function isSameSessionId(a: any, b: any): boolean {
-  return String(a || "") === String(b || "");
-}
-
-function isOrderInsideSessionDay(order: any, session: any): boolean {
-  if (!session) return false;
-  const rawDate = order?.paidAt || order?.paid_at || order?.approvedAt || order?.approved_at || order?.createdAt || order?.created_at;
-  const orderTime = rawDate ? new Date(rawDate).getTime() : NaN;
-  const openedTime = session?.openedAt || session?.opened_at ? new Date(session.openedAt || session.opened_at).getTime() : NaN;
-  const closedTime = session?.closedAt || session?.closed_at ? new Date(session.closedAt || session.closed_at).getTime() : Date.now();
-  if (!Number.isFinite(orderTime) || !Number.isFinite(openedTime)) return false;
-  const lower = openedTime - 10 * 60 * 1000;
-  const upper = (Number.isFinite(closedTime) ? closedTime : Date.now()) + 24 * 60 * 60 * 1000;
-  return orderTime >= lower && orderTime <= upper;
-}
-
-function shouldCountOrderInSession(order: any, session: any): boolean {
-  if (!order || !session) return false;
-  if (!isPaidOrder(order) || isCancelledOrder(order)) return false;
-  const orderSessionId = order.cashSessionId || order.cash_session_id;
-  if (orderSessionId && isSameSessionId(orderSessionId, session.id)) return true;
-  return !orderSessionId && isOrderInsideSessionDay(order, session);
-}
-
-function calculateSessionReconciliation(session: any, sessionOrders: any[], sessionMovements: any[], declared?: any) {
-  const uniqueOrders = new Map<string, any>();
-  (sessionOrders || []).forEach((order: any) => {
-    if (shouldCountOrderInSession(order, session)) {
-      uniqueOrders.set(String(order.id), order);
-    }
-  });
-
-  let salesCash = 0;
-  let salesTransfer = 0;
-  let salesQr = 0;
-  let salesCard = 0;
-  let totalSales = 0;
-
-  uniqueOrders.forEach((order: any) => {
-    const amount = getOrderTotal(order);
-    const method = normalizePaymentMethod(order.paymentMethod || order.payment_method);
-    totalSales += amount;
-    if (method === "efectivo") salesCash += amount;
-    if (method === "transferencia") salesTransfer += amount;
-    if (method === "qr") salesQr += amount;
-    if (method === "tarjeta") salesCard += amount;
-  });
-
-  let cashAdjustments = 0;
-  const movementOrderIds = new Set<string>();
-
-  (sessionMovements || []).forEach((movement: any) => {
-    const type = String(movement.type || "").toLowerCase();
-    const amount = Number(movement.amount || 0) || 0;
-    const method = normalizePaymentMethod(movement.paymentMethod || movement.payment_method);
-    const orderId = movement.orderId || movement.order_id;
-
-    if (orderId) movementOrderIds.add(String(orderId));
-
-    if (type === "adjustment" || type === "ingreso_manual") {
-      if (method === "efectivo") cashAdjustments += amount;
-    }
-
-    if (type === "egreso_manual" || type === "refund") {
-      if (method === "efectivo") cashAdjustments -= Math.abs(amount);
-    }
-
-    if (type === "credit_note" || type === "nota_credito" || type === "void" || type === "ajuste_credito") {
-      const creditAmount = -Math.abs(amount);
-      totalSales += creditAmount;
-      if (method === "efectivo") salesCash += creditAmount;
-      if (method === "transferencia") salesTransfer += creditAmount;
-      if (method === "qr") salesQr += creditAmount;
-      if (method === "tarjeta") salesCard += creditAmount;
-    }
-  });
-
-  // Respaldo: si por alguna razón existe un movimiento de venta sin pedido relacionado en el array,
-  // lo sumamos para que el arqueo no pierda ventas reales.
-  (sessionMovements || []).forEach((movement: any) => {
-    const type = String(movement.type || "").toLowerCase();
-    const orderId = movement.orderId || movement.order_id;
-    if ((type === "sale" || type === "manual_sale") && orderId && !uniqueOrders.has(String(orderId))) {
-      const amount = Number(movement.amount || 0) || 0;
-      const method = normalizePaymentMethod(movement.paymentMethod || movement.payment_method);
-      totalSales += amount;
-      if (method === "efectivo") salesCash += amount;
-      if (method === "transferencia") salesTransfer += amount;
-      if (method === "qr") salesQr += amount;
-      if (method === "tarjeta") salesCard += amount;
-    }
-  });
-
-  const openingAmount = Number(session?.openingAmount ?? session?.opening_amount ?? 0) || 0;
-  const expectedCash = openingAmount + salesCash + cashAdjustments;
-  const expectedTransfer = salesTransfer;
-  const expectedQr = salesQr;
-  const expectedCard = salesCard;
-
-  const declaredCash = Number(declared?.cash ?? declared?.countedCash ?? session?.declaredCash ?? session?.countedCash ?? 0) || 0;
-  const declaredTransfer = Number(declared?.transfer ?? session?.declaredTransfer ?? 0) || 0;
-  const declaredQr = Number(declared?.qr ?? session?.declaredQr ?? 0) || 0;
-  const declaredCard = Number(declared?.card ?? session?.declaredCard ?? 0) || 0;
-
-  const differenceCash = declaredCash - expectedCash;
-  const differenceTransfer = declaredTransfer - expectedTransfer;
-  const differenceQr = declaredQr - expectedQr;
-  const differenceCard = declaredCard - expectedCard;
-  const differenceTotal = differenceCash + differenceTransfer + differenceQr + differenceCard;
-
-  const diffs = [differenceCash, differenceTransfer, differenceQr, differenceCard];
-  const hasNegative = diffs.some(d => d < 0);
-  const hasPositive = diffs.some(d => d > 0);
-
-  let closingResult = "perfect";
-  if (hasPositive && hasNegative) closingResult = "mixed";
-  else if (hasNegative) closingResult = "deficit";
-  else if (hasPositive) closingResult = "surplus";
-
-  return {
-    orders: Array.from(uniqueOrders.values()),
-    movements: sessionMovements || [],
-    totalCash: salesCash,
-    totalTransfer: salesTransfer,
-    totalQr: salesQr,
-    totalCard: salesCard,
-    totalSales,
-    expectedCash,
-    expectedTransfer,
-    expectedQr,
-    expectedCard,
-    declaredCash,
-    declaredTransfer,
-    declaredQr,
-    declaredCard,
-    differenceCash,
-    differenceTransfer,
-    differenceQr,
-    differenceCard,
-    differenceTotal,
-    closingResult,
-    hasDifferences: diffs.some(d => Math.abs(d) > 0.009)
-  };
-}
-
-async function getSessionOrdersAndMovements(session: any, includeOrphans = true) {
-  let sessionOrders: any[] = [];
-  let sessionMovements: any[] = [];
-
-  if (supabase && session) {
-    try {
-      const { data: dbItems } = await supabase.from("order_items").select("*");
-      const { data: dbOrdersBySession, error: bySessionError } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("cash_session_id", session.id);
-
-      if (bySessionError) console.error("[SESSION ORDERS] Error por sesión:", bySessionError.message);
-
-      let dbOrders: any[] = dbOrdersBySession || [];
-
-      if (includeOrphans) {
-        const openedAt = session.openedAt || session.opened_at;
-        const closedAt = session.closedAt || session.closed_at || new Date().toISOString();
-        const { data: possibleOrphans, error: orphanError } = await supabase
-          .from("orders")
-          .select("*")
-          .is("cash_session_id", null)
-          .in("payment_status", ["paid", "pagado"])
-          .gte("created_at", openedAt)
-          .lte("created_at", closedAt);
-
-        if (orphanError) console.error("[SESSION ORDERS] Error buscando huérfanos:", orphanError.message);
-        if (possibleOrphans && possibleOrphans.length) {
-          dbOrders = [...dbOrders, ...possibleOrphans];
-        }
-      }
-
-      const mappedMap = new Map<string, any>();
-      dbOrders.forEach((row: any) => mappedMap.set(String(row.id), mapDbToOrder(row, dbItems || [])));
-      sessionOrders = Array.from(mappedMap.values());
-
-      const { data: dbMovements, error: movementsError } = await supabase
-        .from("cash_movements")
-        .select("*")
-        .eq("cash_session_id", session.id);
-
-      if (movementsError) console.error("[SESSION MOVEMENTS] Error:", movementsError.message);
-      if (dbMovements) sessionMovements = dbMovements.map(mapDbToMovement);
-    } catch (err: any) {
-      console.error("Error fetching session orders/movements from Supabase:", err.message || err);
-    }
-  }
-
-  if (!sessionOrders.length && session) {
-    sessionOrders = orders.filter((o: any) => shouldCountOrderInSession(o, session));
-  }
-
-  if (!sessionMovements.length && session) {
-    const localMovements = loadMovements();
-    sessionMovements = localMovements.filter((m: any) => isSameSessionId(m.cashSessionId, session.id));
-  }
-
-  return { sessionOrders, sessionMovements };
-}
-
 
 
 // Get all orders
@@ -2006,7 +1729,22 @@ app.post("/api/orders", async (req, res) => {
 
 // Helper to get active cash session ID
 async function getActiveSessionId(): Promise<string | null> {
-  const active = await getOpenCashSession();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("cash_sessions")
+        .select("id")
+        .eq("status", "open")
+        .single();
+      if (!error && data) {
+        return data.id;
+      }
+    } catch (err) {
+      // Ignore
+    }
+  }
+  const sessions = loadSessions();
+  const active = sessions.find(s => s.status === 'open');
   if (active) {
     await ensureSessionSynced(active);
     return active.id;
@@ -2276,50 +2014,147 @@ function getCalculatedSession(session: any, ordersList: any[], movementsList: an
 
 // GET /api/cash-session/current
 app.get("/api/cash-session/current", async (req, res) => {
-  const current = await getOpenCashSession();
-
-  if (!current) {
-    return res.json({ session: null, orders: [], movements: [] });
+  let current = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("cash_sessions")
+        .select("*")
+        .eq("status", "open")
+        .single();
+      if (!error && data) {
+        current = mapDbToSession(data);
+      }
+    } catch (err: any) {
+      console.log("ℹ️ No open session found in Supabase or error:", err.message);
+    }
   }
 
+  if (!current) {
+    const sessions = loadSessions();
+    current = sessions.find(s => s.status === 'open');
+  }
+
+  if (!current) {
+    return res.json({ session: null });
+  }
+
+  // Ensure this active session is synced to Supabase
   await ensureSessionSynced(current);
 
-  const { sessionOrders, sessionMovements } = await getSessionOrdersAndMovements(current, true);
+  // Self-healing: Find any paid orders without cashSessionId that were paid around/after session opened,
+  // and associate them with the current open session.
+  let healedAny = false;
+  orders.forEach(o => {
+    if ((o.paymentStatus === 'pagado' || o.paymentStatus === 'paid') && !o.cashSessionId) {
+      const orderTime = new Date(o.paidAt || o.createdAt).getTime();
+      const sessionTime = new Date(current.openedAt).getTime();
+      // If paid/created within 24 hours of session opened, or after session opened:
+      if (Math.abs(orderTime - sessionTime) < 24 * 60 * 60 * 1000) {
+        o.cashSessionId = current.id;
+        healedAny = true;
+        console.log(`Self-healed: Linked orphaned paid order ${o.id} to active session ${current.id}`);
+      }
+    }
+  });
 
-  // Autovincular pedidos pagos huérfanos detectados para que no se pierdan en el arqueo.
-  const orphanOrders = sessionOrders.filter((o: any) => !o.cashSessionId && shouldCountOrderInSession(o, current));
-  if (orphanOrders.length && supabase) {
-    for (const order of orphanOrders) {
+  if (healedAny) {
+    saveOrders(orders);
+    if (supabase) {
       try {
-        await supabase.from("orders").update({ cash_session_id: current.id, updated_at: new Date().toISOString() }).eq("id", order.id);
-        order.cashSessionId = current.id;
-      } catch (err: any) {
-        console.error(`[CURRENT SESSION] No se pudo vincular pedido huérfano ${order.id}:`, err.message || err);
+        for (const o of orders) {
+          if (o.cashSessionId === current.id) {
+            await supabase.from("orders").update({ cash_session_id: current.id }).eq("id", o.id);
+          }
+        }
+      } catch (err) {
+        console.error("Error updating self-healed orders in Supabase:", err);
       }
     }
   }
 
-  const calc = calculateSessionReconciliation(current, sessionOrders, sessionMovements, {
-    cash: current.countedCash || 0,
-    transfer: current.declaredTransfer || 0,
-    qr: current.declaredQr || 0,
-    card: current.declaredCard || 0
+  // Calculate session financials based on current live orders and movements
+  let sessionOrders = [];
+  let sessionMovements = [];
+
+  if (supabase) {
+    try {
+      const { data: dbOrders } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("cash_session_id", current.id)
+        .in("payment_status", ["paid", "pagado"]);
+      
+      const { data: dbMovements } = await supabase
+        .from("cash_movements")
+        .select("*")
+        .eq("cash_session_id", current.id);
+
+      if (dbOrders) {
+        sessionOrders = dbOrders.map(o => mapDbToOrder(o, [])); // simple headers
+      }
+      if (dbMovements) {
+        sessionMovements = dbMovements.map(mapDbToMovement);
+      }
+    } catch (err) {
+      console.error("Error fetching live calculations from Supabase:", err);
+    }
+  }
+
+  // Fallback to local files if Supabase is empty or failed
+  if (!sessionOrders.length) {
+    sessionOrders = orders.filter(o => o.cashSessionId === current.id && o.paymentStatus === 'pagado');
+  }
+  if (!sessionMovements.length) {
+    const movements = loadMovements();
+    sessionMovements = movements.filter(m => m.cashSessionId === current.id);
+  }
+
+  // Perform calculations
+  let totalCash = 0;
+  let totalTransfer = 0;
+  let totalQr = 0;
+  let totalCard = 0;
+  let totalSales = 0;
+
+  sessionOrders.forEach(o => {
+    const amount = o.total || 0;
+    totalSales += amount;
+    const method = String(o.paymentMethod || "").toLowerCase();
+    if (method === 'efectivo' || method === 'efectivo_caja') {
+      totalCash += amount;
+    } else if (method === 'transferencia' || method === 'pago_movil') {
+      totalTransfer += amount;
+    } else if (method === 'qr' || method === 'qr_caja') {
+      totalQr += amount;
+    } else if (method === 'tarjeta' || method === 'tarjeta_caja' || method === 'simulado_tarjeta') {
+      totalCard += amount;
+    } else {
+      totalCash += amount;
+    }
   });
+
+  let expectedCash = current.openingAmount;
+  sessionMovements.forEach(m => {
+    if (m.type === 'adjustment') {
+      expectedCash += m.amount;
+    } else if (m.type === 'refund') {
+      expectedCash -= m.amount;
+    }
+  });
+  expectedCash += totalCash;
 
   const calculated = {
     ...current,
-    totalCash: calc.totalCash,
-    totalTransfer: calc.totalTransfer,
-    totalQr: calc.totalQr,
-    totalCard: calc.totalCard,
-    totalSales: calc.totalSales,
-    expectedCash: calc.expectedCash,
-    expectedTransfer: calc.expectedTransfer,
-    expectedQr: calc.expectedQr,
-    expectedCard: calc.expectedCard
+    totalCash,
+    totalTransfer,
+    totalQr,
+    totalCard,
+    totalSales,
+    expectedCash
   };
 
-  res.json({ session: calculated, orders: calc.orders, movements: calc.movements });
+  res.json({ session: calculated });
 });
 
 // POST /api/cash-session/open
@@ -2405,64 +2240,160 @@ app.post("/api/cash-session/open", async (req, res) => {
 
 // POST /api/cash-session/close
 app.post("/api/cash-session/close", async (req, res) => {
-  const {
-    closedBy,
-    countedCash,
-    totalTransfer,
-    totalQr,
-    totalCard,
-    closingNote,
-    closingResult: clientClosingResult,
-    forceClose = false,
-    authorizedBy
-  } = req.body;
-
+  const { closedBy, countedCash, totalTransfer, totalQr, totalCard, closingNote, closingResult: clientClosingResult } = req.body;
   if (!closedBy) {
     return res.status(400).json({ error: "Debe especificar el nombre del responsable del cierre." });
   }
 
-  const current = await getOpenCashSession();
+  let current = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("cash_sessions")
+        .select("*")
+        .eq("status", "open")
+        .single();
+      if (!error && data) {
+        current = mapDbToSession(data);
+      }
+    } catch (err) {
+      console.error("Error fetching open session from Supabase:", err);
+    }
+  }
+
+  if (!current) {
+    const sessions = loadSessions();
+    current = sessions.find(s => s.status === 'open');
+  }
 
   if (!current) {
     return res.status(400).json({ error: "No hay ninguna sesión de caja abierta para cerrar." });
   }
 
-  const { sessionOrders, sessionMovements } = await getSessionOrdersAndMovements(current, true);
+  // Self-healing: Find any paid orders without cashSessionId that were paid around/after session opened,
+  // and associate them with the current open session.
+  let healedAny = false;
+  orders.forEach(o => {
+    if ((o.paymentStatus === 'pagado' || o.paymentStatus === 'paid') && !o.cashSessionId) {
+      const orderTime = new Date(o.paidAt || o.createdAt).getTime();
+      const sessionTime = new Date(current.openedAt).getTime();
+      // If paid/created within 24 hours of session opened, or after session opened:
+      if (Math.abs(orderTime - sessionTime) < 24 * 60 * 60 * 1000) {
+        o.cashSessionId = current.id;
+        healedAny = true;
+        console.log(`Self-healed at closure: Linked orphaned paid order ${o.id} to active session ${current.id}`);
+      }
+    }
+  });
 
-  // Autovincular pedidos pagos sin cash_session_id que pertenecen al día de caja.
-  const orphanOrders = sessionOrders.filter((o: any) => !o.cashSessionId && shouldCountOrderInSession(o, current));
-  if (orphanOrders.length && supabase) {
-    for (const order of orphanOrders) {
+  if (healedAny) {
+    saveOrders(orders);
+    if (supabase) {
       try {
-        await supabase.from("orders").update({ cash_session_id: current.id, updated_at: new Date().toISOString() }).eq("id", order.id);
-        order.cashSessionId = current.id;
-      } catch (err: any) {
-        console.error(`[CLOSE SESSION] No se pudo vincular pedido huérfano ${order.id}:`, err.message || err);
+        for (const o of orders) {
+          if (o.cashSessionId === current.id) {
+            await supabase.from("orders").update({ cash_session_id: current.id }).eq("id", o.id);
+          }
+        }
+      } catch (err) {
+        console.error("Error updating self-healed orders in Supabase during closure:", err);
       }
     }
   }
 
-  const calc = calculateSessionReconciliation(current, sessionOrders, sessionMovements, {
-    cash: Number(countedCash) || 0,
-    transfer: Number(totalTransfer) || 0,
-    qr: Number(totalQr) || 0,
-    card: Number(totalCard) || 0
-  });
+  // Calculate financial details dynamically
+  let sessionOrders = [];
+  let sessionMovements = [];
 
-  if (calc.hasDifferences && !forceClose) {
-    return res.status(409).json({
-      error: "Hay diferencias en el arqueo. Debe corregir los montos, crear una nota de crédito o cerrar con autorización y observación.",
-      requiresAdjustment: true,
-      reconciliation: calc
-    });
+  if (supabase) {
+    try {
+      const { data: dbOrders } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("cash_session_id", current.id)
+        .in("payment_status", ["paid", "pagado"]);
+      
+      const { data: dbMovements } = await supabase
+        .from("cash_movements")
+        .select("*")
+        .eq("cash_session_id", current.id);
+
+      if (dbOrders) {
+        sessionOrders = dbOrders.map(o => mapDbToOrder(o, []));
+      }
+      if (dbMovements) {
+        sessionMovements = dbMovements.map(mapDbToMovement);
+      }
+    } catch (err) {
+      console.error("Error fetching live calculations from Supabase:", err);
+    }
   }
 
-  if (calc.hasDifferences && !String(closingNote || "").trim()) {
-    return res.status(400).json({
-      error: "Para cerrar con diferencias es obligatorio cargar una observación explicando el motivo.",
-      requiresNote: true,
-      reconciliation: calc
-    });
+  if (!sessionOrders.length) {
+    sessionOrders = orders.filter(o => o.cashSessionId === current.id && o.paymentStatus === 'pagado');
+  }
+  if (!sessionMovements.length) {
+    const movements = loadMovements();
+    sessionMovements = movements.filter(m => m.cashSessionId === current.id);
+  }
+
+  // Calculate
+  let totalCash = 0; // expected cash from sales
+  let expected_transfer = 0;
+  let expected_qr = 0;
+  let expected_card = 0;
+  let totalSales = 0;
+
+  sessionOrders.forEach(o => {
+    const amount = o.total || 0;
+    totalSales += amount;
+    const method = normalizePaymentMethod(o.paymentMethod);
+    if (method === 'efectivo') {
+      totalCash += amount;
+    } else if (method === 'transferencia') {
+      expected_transfer += amount;
+    } else if (method === 'qr') {
+      expected_qr += amount;
+    } else if (method === 'tarjeta') {
+      expected_card += amount;
+    }
+  });
+
+  let expectedCash = current.openingAmount;
+  sessionMovements.forEach(m => {
+    if (m.type === 'adjustment') {
+      expectedCash += m.amount;
+    } else if (m.type === 'refund') {
+      expectedCash -= m.amount;
+    }
+  });
+  expectedCash += totalCash;
+
+  const finalExpectedCash = expectedCash;
+  const finalCountedCash = Number(countedCash) || 0;
+  const difference_cash = finalCountedCash - finalExpectedCash;
+
+  const finalTotalTransfer = Number(totalTransfer) || 0;
+  const finalTotalQr = Number(totalQr) || 0;
+  const finalTotalCard = Number(totalCard) || 0;
+
+  const difference_transfer = finalTotalTransfer - expected_transfer;
+  const difference_qr = finalTotalQr - expected_qr;
+  const difference_card = finalTotalCard - expected_card;
+  const difference_total = difference_cash + difference_transfer + difference_qr + difference_card;
+
+  // Classify overall result
+  const diffs = [difference_cash, difference_transfer, difference_qr, difference_card];
+  const hasNegative = diffs.some(d => d < 0);
+  const hasPositive = diffs.some(d => d > 0);
+
+  let closingResult = "perfect";
+  if (hasPositive && hasNegative) {
+    closingResult = "mixed";
+  } else if (hasNegative) {
+    closingResult = "deficit";
+  } else if (hasPositive) {
+    closingResult = "surplus";
   }
 
   const closedSession = {
@@ -2470,44 +2401,48 @@ app.post("/api/cash-session/close", async (req, res) => {
     status: "closed",
     closedBy,
     closedAt: new Date().toISOString(),
-    countedCash: calc.declaredCash,
-    totalTransfer: calc.declaredTransfer,
-    totalQr: calc.declaredQr,
-    totalCard: calc.declaredCard,
-    totalCash: calc.totalCash,
-    expectedCash: calc.expectedCash,
-    totalSales: calc.totalSales,
-    difference: calc.differenceCash,
+    countedCash: finalCountedCash,
+    totalTransfer: finalTotalTransfer,
+    totalQr: finalTotalQr,
+    totalCard: finalTotalCard,
+    totalCash,
+    expectedCash: finalExpectedCash,
+    totalSales,
+    difference: difference_cash,
     closingNote: closingNote || "",
     updatedAt: new Date().toISOString(),
-    declaredCash: calc.declaredCash,
-    declaredTransfer: calc.declaredTransfer,
-    declaredQr: calc.declaredQr,
-    declaredCard: calc.declaredCard,
-    expectedTransfer: calc.expectedTransfer,
-    expectedQr: calc.expectedQr,
-    expectedCard: calc.expectedCard,
-    differenceTransfer: calc.differenceTransfer,
-    differenceQr: calc.differenceQr,
-    differenceCard: calc.differenceCard,
-    differenceTotal: calc.differenceTotal,
-    closingResult: calc.hasDifferences ? (clientClosingResult || "with_differences") : "perfect",
-    authorizedBy: authorizedBy || closedBy
+
+    // New Fields
+    declaredCash: finalCountedCash,
+    declaredTransfer: finalTotalTransfer,
+    declaredQr: finalTotalQr,
+    declaredCard: finalTotalCard,
+    expectedTransfer: expected_transfer,
+    expectedQr: expected_qr,
+    expectedCard: expected_card,
+    differenceTransfer: difference_transfer,
+    differenceQr: difference_qr,
+    differenceCard: difference_card,
+    differenceTotal: difference_total,
+    closingResult: clientClosingResult || closingResult
   };
 
+  // Save locally
   const sessions = loadSessions();
-  const openIdx = sessions.findIndex((s: any) => s.id === current.id);
-  if (openIdx !== -1) sessions[openIdx] = closedSession;
-  else sessions.unshift(closedSession);
+  const openIdx = sessions.findIndex(s => s.id === current.id);
+  if (openIdx !== -1) {
+    sessions[openIdx] = closedSession;
+  } else {
+    sessions.unshift(closedSession);
+  }
   saveSessions(sessions);
 
   const newMovement = {
     id: crypto.randomUUID(),
     cashSessionId: current.id,
     type: "closing",
-    paymentMethod: "efectivo",
-    amount: calc.declaredCash,
-    description: `Cierre de Caja. Resultado: ${closedSession.closingResult}. Dif Total: ${calc.differenceTotal >= 0 ? '+' : ''}${calc.differenceTotal}`,
+    amount: finalCountedCash,
+    description: `Cierre de Caja. Resultado: ${closingResult.toUpperCase()}. Dif Total: ${difference_total >= 0 ? '+' : ''}${difference_total}`,
     createdBy: closedBy,
     createdAt: new Date().toISOString()
   };
@@ -2522,11 +2457,11 @@ app.post("/api/cash-session/close", async (req, res) => {
       await supabase.from("cash_movements").insert([mapMovementToDb(newMovement)]);
       console.log("✅ [SUPABASE] Sesión de caja cerrada exitosamente en base de datos.");
     } catch (err: any) {
-      console.error("❌ Error de Supabase al cerrar la caja:", err.message || err);
+      console.error("❌ Error de Supabase al cerrar la caja:", err.message);
     }
   }
 
-  res.json({ session: closedSession, reconciliation: calc });
+  res.json({ session: closedSession });
 });
 
 // GET /api/cash-session/:id/report
@@ -2537,14 +2472,19 @@ app.get("/api/cash-session/:id/report", async (req, res) => {
   if (supabase) {
     try {
       if (id === 'current') {
-        session = await getOpenCashSession();
+        const { data, error } = await supabase
+          .from("cash_sessions")
+          .select("*")
+          .eq("status", "open")
+          .single();
+        if (!error && data) session = mapDbToSession(data);
       } else {
         const { data, error } = await supabase
           .from("cash_sessions")
           .select("*")
           .eq("id", id)
-          .limit(1);
-        if (!error && data && data.length > 0) session = mapDbToSession(data[0]);
+          .single();
+        if (!error && data) session = mapDbToSession(data);
       }
     } catch (err) {
       console.error("Error fetching session from Supabase:", err);
@@ -2553,50 +2493,153 @@ app.get("/api/cash-session/:id/report", async (req, res) => {
 
   if (!session) {
     const sessions = loadSessions();
-    session = id === 'current' ? sessions.find((s: any) => s.status === 'open') : sessions.find((s: any) => s.id === id);
+    if (id === 'current') {
+      session = sessions.find(s => s.status === 'open');
+    } else {
+      session = sessions.find(s => s.id === id);
+    }
   }
 
   if (!session) {
     return res.status(404).json({ error: "Sesión de caja no encontrada." });
   }
 
-  const { sessionOrders, sessionMovements } = await getSessionOrdersAndMovements(session, true);
+  // Fetch orders and movements from Supabase
+  let sessionOrders = [];
+  let sessionMovements = [];
 
-  const calc = calculateSessionReconciliation(session, sessionOrders, sessionMovements, {
-    cash: session.status === "closed" ? (session.declaredCash ?? session.countedCash ?? 0) : 0,
-    transfer: session.status === "closed" ? (session.declaredTransfer ?? 0) : 0,
-    qr: session.status === "closed" ? (session.declaredQr ?? 0) : 0,
-    card: session.status === "closed" ? (session.declaredCard ?? 0) : 0
+  if (supabase) {
+    try {
+      const { data: dbOrders } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("cash_session_id", session.id);
+      
+      const { data: dbItems } = await supabase
+        .from("order_items")
+        .select("*");
+
+      const { data: dbMovements } = await supabase
+        .from("cash_movements")
+        .select("*")
+        .eq("cash_session_id", session.id);
+
+      if (dbOrders) {
+        sessionOrders = dbOrders.map(o => mapDbToOrder(o, dbItems || []));
+      }
+      if (dbMovements) {
+        sessionMovements = dbMovements.map(mapDbToMovement);
+      }
+    } catch (err) {
+      console.error("Error fetching session details from Supabase:", err);
+    }
+  }
+
+  // Fallback
+  if (!sessionOrders.length) {
+    sessionOrders = orders.filter(o => o.cashSessionId === session.id);
+  }
+  if (!sessionMovements.length) {
+    const movements = loadMovements();
+    sessionMovements = movements.filter(m => m.cashSessionId === session.id);
+  }
+
+  // Recalculate session statistics (same logic for consistency)
+  let totalCash_sales = 0;
+  let expected_transfer = 0;
+  let expected_qr = 0;
+  let expected_card = 0;
+  let totalSales_calc = 0;
+
+  sessionOrders.filter(o => o.paymentStatus === 'pagado').forEach(o => {
+    const amount = o.total || 0;
+    totalSales_calc += amount;
+    const method = normalizePaymentMethod(o.paymentMethod);
+    if (method === 'efectivo') {
+      totalCash_sales += amount;
+    } else if (method === 'transferencia') {
+      expected_transfer += amount;
+    } else if (method === 'qr') {
+      expected_qr += amount;
+    } else if (method === 'tarjeta') {
+      expected_card += amount;
+    }
   });
+
+  let expectedCash_calc = session.openingAmount;
+  sessionMovements.forEach(m => {
+    if (m.type === 'adjustment') {
+      expectedCash_calc += m.amount;
+    } else if (m.type === 'refund') {
+      expectedCash_calc -= m.amount;
+    }
+  });
+  expectedCash_calc += totalCash_sales;
+
+  // Populate fields with fallback for older closed sessions
+  const isClosed = session.status === 'closed';
+
+  const declaredCash = isClosed ? (session.declaredCash !== undefined && session.declaredCash !== null ? session.declaredCash : (session.countedCash || 0)) : 0;
+  const declaredTransfer = isClosed ? (session.declaredTransfer || 0) : 0;
+  const declaredQr = isClosed ? (session.declaredQr || 0) : 0;
+  const declaredCard = isClosed ? (session.declaredCard || 0) : 0;
+
+  const expTransfer = isClosed ? (session.expectedTransfer !== undefined && session.expectedTransfer !== null ? session.expectedTransfer : expected_transfer) : expected_transfer;
+  const expQr = isClosed ? (session.expectedQr !== undefined && session.expectedQr !== null ? session.expectedQr : expected_qr) : expected_qr;
+  const expCard = isClosed ? (session.expectedCard !== undefined && session.expectedCard !== null ? session.expectedCard : expected_card) : expected_card;
+  const expCash = isClosed ? (session.expectedCash !== undefined && session.expectedCash !== null ? session.expectedCash : expectedCash_calc) : expectedCash_calc;
+
+  const diffCash = isClosed ? (session.difference !== undefined && session.difference !== null ? session.difference : (declaredCash - expCash)) : undefined;
+  const diffTransfer = isClosed ? (session.differenceTransfer !== undefined && session.differenceTransfer !== null ? session.differenceTransfer : (declaredTransfer - expTransfer)) : undefined;
+  const diffQr = isClosed ? (session.differenceQr !== undefined && session.differenceQr !== null ? session.differenceQr : (declaredQr - expQr)) : undefined;
+  const diffCard = isClosed ? (session.differenceCard !== undefined && session.differenceCard !== null ? session.differenceCard : (declaredCard - expCard)) : undefined;
+  const diffTotal = isClosed ? (session.differenceTotal !== undefined && session.differenceTotal !== null ? session.differenceTotal : ((diffCash || 0) + (diffTransfer || 0) + (diffQr || 0) + (diffCard || 0))) : undefined;
+
+  let closingResult = session.closingResult;
+  if (isClosed && !closingResult) {
+    const diffs = [diffCash || 0, diffTransfer || 0, diffQr || 0, diffCard || 0];
+    const hasNegative = diffs.some(d => d < 0);
+    const hasPositive = diffs.some(d => d > 0);
+    if (hasPositive && hasNegative) {
+      closingResult = "mixed";
+    } else if (hasNegative) {
+      closingResult = "deficit";
+    } else if (hasPositive) {
+      closingResult = "surplus";
+    } else {
+      closingResult = "perfect";
+    }
+  }
 
   const calculated = {
     ...session,
-    totalCash: calc.totalCash,
-    totalTransfer: calc.totalTransfer,
-    totalQr: calc.totalQr,
-    totalCard: calc.totalCard,
-    totalSales: calc.totalSales,
-    expectedCash: calc.expectedCash,
-    difference: session.status === "closed" ? calc.differenceCash : undefined,
-    declaredCash: session.status === "closed" ? calc.declaredCash : 0,
-    declaredTransfer: session.status === "closed" ? calc.declaredTransfer : 0,
-    declaredQr: session.status === "closed" ? calc.declaredQr : 0,
-    declaredCard: session.status === "closed" ? calc.declaredCard : 0,
-    expectedTransfer: calc.expectedTransfer,
-    expectedQr: calc.expectedQr,
-    expectedCard: calc.expectedCard,
-    differenceTransfer: session.status === "closed" ? calc.differenceTransfer : undefined,
-    differenceQr: session.status === "closed" ? calc.differenceQr : undefined,
-    differenceCard: session.status === "closed" ? calc.differenceCard : undefined,
-    differenceTotal: session.status === "closed" ? calc.differenceTotal : undefined,
-    closingResult: session.status === "closed" ? (session.closingResult || calc.closingResult) : "open"
+    totalCash: totalCash_sales,
+    totalTransfer: isClosed ? (session.totalTransfer !== undefined ? session.totalTransfer : expTransfer) : expTransfer,
+    totalQr: isClosed ? (session.totalQr !== undefined ? session.totalQr : expQr) : expQr,
+    totalCard: isClosed ? (session.totalCard !== undefined ? session.totalCard : expCard) : expCard,
+    totalSales: isClosed ? session.totalSales : totalSales_calc,
+    expectedCash: expCash,
+    difference: diffCash,
+
+    // New Fields
+    declaredCash,
+    declaredTransfer,
+    declaredQr,
+    declaredCard,
+    expectedTransfer: expTransfer,
+    expectedQr: expQr,
+    expectedCard: expCard,
+    differenceTransfer: diffTransfer,
+    differenceQr: diffQr,
+    differenceCard: diffCard,
+    differenceTotal: diffTotal,
+    closingResult: isClosed ? closingResult : "open"
   };
 
   res.json({
     session: calculated,
-    orders: calc.orders,
-    movements: calc.movements,
-    reconciliation: calc
+    orders: sessionOrders,
+    movements: sessionMovements
   });
 });
 
@@ -2607,8 +2650,8 @@ app.post("/api/orders/manual", async (req, res) => {
     return res.status(400).json({ error: "Faltan datos obligatorios para el pedido manual." });
   }
 
-  const currentSession = await getOpenCashSession();
-  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
+ const currentSession = await getOpenCashSession();
+const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
 
   if (!currentSession) {
     return res.status(400).json({ error: "Debe abrir caja antes de registrar un pedido manual." });
@@ -2625,7 +2668,7 @@ app.post("/api/orders/manual", async (req, res) => {
     updatedAt: new Date().toISOString(),
     customerName,
     customerPhone: customerPhone || "",
-    paymentMethod: normalizedPaymentMethod, // efectivo, transferencia, qr, tarjeta
+    paymentMethod, // efectivo, transferencia, qr, tarjeta
     paymentStatus: "pagado", // Immediately paid
     source: "manual_cashier",
     cashierName: currentSession.openedBy,
@@ -2673,7 +2716,7 @@ app.post("/api/orders/manual", async (req, res) => {
     cashSessionId: currentSession.id,
     orderId: newOrder.id,
     type: "manual_sale",
-    paymentMethod: normalizedPaymentMethod,
+    paymentMethod,
     amount: total,
     description: `Pedido manual - ${customerName}`,
     createdBy: currentSession.openedBy,
@@ -2702,25 +2745,34 @@ app.post("/api/orders/manual", async (req, res) => {
 // POST /api/orders/:id/pay
 app.post("/api/orders/:id/pay", async (req, res) => {
   const { id } = req.params;
-  const { paymentMethod, cashierName, cashSessionId } = req.body;
+  const { paymentMethod, cashierName } = req.body;
 
-  const currentSession = await getOpenCashSession(cashSessionId || null);
-  const normalizedPaymentMethod = normalizePaymentMethod(paymentMethod);
-
-  console.log("[PAY ORDER] Validando caja abierta:", {
-    orderId: id,
-    paymentMethod,
-    normalizedPaymentMethod,
-    requestedCashSessionId: cashSessionId,
-    currentSessionId: currentSession?.id,
-    currentSessionStatus: currentSession?.status
-  });
+  let currentSession = null;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("cash_sessions")
+        .select("*")
+        .eq("status", "open")
+        .single();
+      if (!error && data) {
+        currentSession = mapDbToSession(data);
+      }
+    } catch (err) {
+      console.error("Error fetching open session from Supabase:", err);
+    }
+  }
+  if (!currentSession) {
+    const sessions = loadSessions();
+    currentSession = sessions.find(s => s.status === 'open');
+  }
 
   if (!currentSession) {
     return res.status(400).json({ error: "Debe abrir caja antes de poder cobrar un pedido." });
   }
 
-  let orderIndex = orders.findIndex((o: any) => o.id === id);
+  // Find order
+  let orderIndex = orders.findIndex(o => o.id === id);
   if (orderIndex === -1 && supabase) {
     try {
       const { data: dbOrder } = await supabase.from("orders").select("*").eq("id", id).single();
@@ -2740,28 +2792,20 @@ app.post("/api/orders/:id/pay", async (req, res) => {
   }
 
   const order = orders[orderIndex];
+  const method = paymentMethod || 'efectivo'; // default fallback
 
-  if (isCancelledOrder(order)) {
-    return res.status(400).json({ error: "Este pedido fue desestimado o cancelado y no puede cobrarse." });
-  }
+  const oldStatus = order.status;
+  const oldPaymentStatus = order.paymentStatus;
 
-  if (isPaidOrder(order)) {
-    return res.status(409).json({
-      error: "Este pedido ya fue cobrado y no puede cobrarse nuevamente.",
-      alreadyPaid: true,
-      order
-    });
-  }
-
-  const now = new Date().toISOString();
   orders[orderIndex].paymentStatus = "pagado";
-  orders[orderIndex].paymentMethod = normalizedPaymentMethod;
+  orders[orderIndex].paymentMethod = method;
   orders[orderIndex].cashierName = cashierName || currentSession.openedBy;
   orders[orderIndex].cashSessionId = currentSession.id;
-  orders[orderIndex].paidAt = now;
-  orders[orderIndex].approvedAt = now;
-  orders[orderIndex].status = "recibido";
-  orders[orderIndex].updatedAt = now;
+  orders[orderIndex].paidAt = new Date().toISOString();
+  orders[orderIndex].approvedAt = new Date().toISOString();
+  orders[orderIndex].status = "recibido"; // Set to recibido locally so Cocina sees it immediately as approved
+  orders[orderIndex].updatedAt = new Date().toISOString();
+
   saveOrders(orders);
 
   const newMovement = {
@@ -2769,28 +2813,29 @@ app.post("/api/orders/:id/pay", async (req, res) => {
     cashSessionId: currentSession.id,
     orderId: order.id,
     type: "sale",
-    paymentMethod: normalizedPaymentMethod,
-    amount: getOrderTotal(order),
+    paymentMethod: method,
+    amount: order.total,
     description: `Cobro Pedido ${order.id} - ${order.customerName}`,
     createdBy: cashierName || currentSession.openedBy,
-    createdAt: now
+    createdAt: new Date().toISOString()
   };
 
   const movements = loadMovements();
   movements.unshift(newMovement);
   saveMovements(movements);
 
+  let supabaseResponse = null;
   if (supabase) {
     try {
       const dbUpdate = {
         payment_status: "paid",
-        payment_method: normalizedPaymentMethod,
+        payment_method: method,
         status: "approved",
         cashier_name: cashierName || currentSession.openedBy || "Rita",
         cash_session_id: currentSession.id,
-        paid_at: now,
-        approved_at: now,
-        updated_at: now
+        paid_at: new Date().toISOString(),
+        approved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
 
       const { data, error } = await supabase
@@ -2799,118 +2844,39 @@ app.post("/api/orders/:id/pay", async (req, res) => {
         .eq("id", order.id)
         .select("*");
 
-      if (error) {
-        console.error("[PAY ORDER] Error actualizando pedido en Supabase:", error.message);
-      }
+      supabaseResponse = { data, error };
 
-      const dbMov = mapMovementToDb({
-        ...newMovement,
-        concept: "Venta pedido"
+      console.log(`[DIAGNOSTIC LOG /pay]`, {
+        orderId: order.id,
+        oldStatus,
+        oldPaymentStatus,
+        newStatus: orders[orderIndex].status,
+        newPaymentStatus: orders[orderIndex].paymentStatus,
+        dbUpdate,
+        supabaseResponse: JSON.stringify(supabaseResponse)
       });
 
-      const { error: movementError } = await supabase.from("cash_movements").insert([dbMov]);
-      if (movementError) {
-        console.error("[PAY ORDER] Error insertando movimiento:", movementError.message);
-      } else {
-        console.log(`✅ [SUPABASE] Cobro de pedido ${id} e inserción de movimiento completado.`);
-      }
+      const dbMov = mapMovementToDb({
+        id: newMovement.id,
+        cashSessionId: currentSession.id,
+        orderId: order.id,
+        type: "sale",
+        paymentMethod: method,
+        amount: order.total,
+        description: `Cobro Pedido ${order.id} - ${order.customerName}`,
+        concept: "Venta pedido QR",
+        createdBy: cashierName || currentSession.openedBy || "Rita",
+        createdAt: new Date().toISOString()
+      });
+
+      await supabase.from("cash_movements").insert([dbMov]);
+      console.log(`✅ [SUPABASE] Cobro de pedido ${id} e inserción de movimiento completado.`);
     } catch (err: any) {
-      console.error("Error inserting movement or updating order in Supabase:", err.message || err);
+      console.error("Error inserting movement or updating order in Supabase:", err.message);
     }
   }
 
   res.json(orders[orderIndex]);
-});
-
-// POST /api/orders/:id/credit-note - Nota de crédito / ajuste de pedido cobrado
-app.post("/api/orders/:id/credit-note", async (req, res) => {
-  const { id } = req.params;
-  const { adminPassword, reason, amount, paymentMethod, createdBy } = req.body;
-
-  const isAuthorized = await isValidAdminPassword(adminPassword);
-  if (!isAuthorized) {
-    return res.status(403).json({ error: "Clave administrativa incorrecta. No se creó la nota de crédito." });
-  }
-
-  if (!reason || !String(reason).trim()) {
-    return res.status(400).json({ error: "Debe ingresar un motivo para la nota de crédito." });
-  }
-
-  const currentSession = await getOpenCashSession();
-  if (!currentSession) {
-    return res.status(400).json({ error: "Debe haber una caja abierta para crear una nota de crédito." });
-  }
-
-  let orderIndex = orders.findIndex((o: any) => o.id === id);
-  if (orderIndex === -1 && supabase) {
-    try {
-      const { data: dbOrder } = await supabase.from("orders").select("*").eq("id", id).single();
-      if (dbOrder) {
-        const { data: dbItems } = await supabase.from("order_items").select("*").eq("order_id", id);
-        const mapped = mapDbToOrder(dbOrder, dbItems || []);
-        orders.unshift(mapped);
-        orderIndex = 0;
-      }
-    } catch (err) {
-      console.error("Error fetching order for credit note:", err);
-    }
-  }
-
-  if (orderIndex === -1) {
-    return res.status(404).json({ error: "Pedido no encontrado." });
-  }
-
-  const order = orders[orderIndex];
-  if (!isPaidOrder(order)) {
-    return res.status(400).json({ error: "Solo se puede crear nota de crédito sobre pedidos cobrados." });
-  }
-
-  const method = normalizePaymentMethod(paymentMethod || order.paymentMethod);
-  const maxAmount = getOrderTotal(order);
-  const requestedAmount = Math.abs(Number(amount) || maxAmount);
-  const creditAmount = Math.min(requestedAmount, maxAmount);
-  const now = new Date().toISOString();
-
-  const movement = {
-    id: crypto.randomUUID(),
-    cashSessionId: order.cashSessionId || currentSession.id,
-    orderId: order.id,
-    type: "credit_note",
-    paymentMethod: method,
-    amount: -Math.abs(creditAmount),
-    description: `Nota de crédito ${order.id}: ${String(reason).trim()}`,
-    createdBy: createdBy || currentSession.openedBy || "Rita",
-    createdAt: now
-  };
-
-  const movements = loadMovements();
-  movements.unshift(movement);
-  saveMovements(movements);
-
-  orders[orderIndex] = {
-    ...order,
-    hasCreditNote: true,
-    creditNoteAmount: Number(order.creditNoteAmount || 0) + creditAmount,
-    notes: `${order.notes || ""}\nNota de crédito: $${creditAmount} - ${String(reason).trim()}`.trim(),
-    updatedAt: now
-  };
-  saveOrders(orders);
-
-  if (supabase) {
-    try {
-      await supabase.from("cash_movements").insert([mapMovementToDb(movement)]);
-      await supabase.from("orders").update({
-        has_credit_note: true,
-        credit_note_amount: Number(order.creditNoteAmount || 0) + creditAmount,
-        notes: orders[orderIndex].notes,
-        updated_at: now
-      }).eq("id", order.id);
-    } catch (err: any) {
-      console.error("Error creating credit note in Supabase:", err.message || err);
-    }
-  }
-
-  res.json({ success: true, order: orders[orderIndex], movement });
 });
 
 // GET /api/cash-movements
