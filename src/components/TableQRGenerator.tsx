@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Download,
   Loader2,
@@ -6,7 +6,6 @@ import {
   Sparkles,
   Utensils,
 } from "lucide-react";
-import { toPng } from "html-to-image";
 
 interface TableQRGeneratorProps {
   appUrl: string;
@@ -15,9 +14,6 @@ interface TableQRGeneratorProps {
 export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) => {
   const [selectedTable, setSelectedTable] = useState<number>(1);
   const [exporting, setExporting] = useState<boolean>(false);
-
-  const previewCardRef = useRef<HTMLDivElement>(null);
-  const exportCardRef = useRef<HTMLDivElement>(null);
 
   const totalTables = 12;
 
@@ -44,9 +40,9 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
   const getQrImageUrl = (tableNumber: number) => {
     const tableUrl = getTableUrl(tableNumber);
 
-    return `https://api.qrserver.com/v1/create-qr-code/?size=500x500&color=0d1e36&bgcolor=ffffff&margin=12&data=${encodeURIComponent(
+    return `https://api.qrserver.com/v1/create-qr-code/?size=800x800&color=0d1e36&bgcolor=ffffff&margin=16&data=${encodeURIComponent(
       tableUrl
-    )}`;
+    )}&v=${Date.now()}-${tableNumber}`;
   };
 
   const selectedTableUrl = useMemo(() => {
@@ -57,28 +53,50 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
     return getQrImageUrl(selectedTable);
   }, [selectedTable, appUrl]);
 
-  const waitForImagesInside = async (element: HTMLElement) => {
-    const images = Array.from(element.querySelectorAll("img"));
+  const loadImage = (src: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("No se pudo cargar el QR."));
+      img.src = src;
+    });
+  };
 
-    await Promise.all(
-      images.map((img) => {
-        if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+  const drawRoundedRect = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number
+  ) => {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  };
 
-        return new Promise<void>((resolve) => {
-          const timeout = window.setTimeout(() => resolve(), 4000);
-
-          img.onload = () => {
-            window.clearTimeout(timeout);
-            resolve();
-          };
-
-          img.onerror = () => {
-            window.clearTimeout(timeout);
-            resolve();
-          };
-        });
-      })
-    );
+  const drawCenteredText = (
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    font: string,
+    color: string
+  ) => {
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x, y);
   };
 
   const handleSelectTable = (tableNumber: number) => {
@@ -86,125 +104,199 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
   };
 
   const handleDownloadPng = async () => {
-    if (!exportCardRef.current) return;
-
     const tableToExport = selectedTable;
+    const tableUrl = getTableUrl(tableToExport);
+    const qrUrl = getQrImageUrl(tableToExport);
 
     setExporting(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const qrImage = await loadImage(qrUrl);
 
-      if (!exportCardRef.current) return;
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
 
-      await waitForImagesInside(exportCardRef.current);
+      if (!ctx) {
+        throw new Error("No se pudo crear el canvas.");
+      }
 
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const width = 1200;
+      const height = 1800;
 
-      const dataUrl = await toPng(exportCardRef.current, {
-        pixelRatio: 3,
-        cacheBust: true,
-        backgroundColor: "#0c1222",
-        style: {
-          borderRadius: "24px",
-          margin: "0",
-          transform: "scale(1)",
-          transformOrigin: "top left",
-          width: "384px",
-          boxShadow: "none",
-        },
+      canvas.width = width;
+      canvas.height = height;
+
+      const bg = "#0c1222";
+      const amber = "#fbbf24";
+      const white = "#ffffff";
+      const muted = "rgba(255,255,255,0.72)";
+      const cardDark = "#0f172a";
+
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, width, height);
+
+      // Borde principal
+      ctx.strokeStyle = amber;
+      ctx.lineWidth = 10;
+      drawRoundedRect(ctx, 36, 36, width - 72, height - 72, 54);
+      ctx.stroke();
+
+      // Esquinas decorativas
+      ctx.strokeStyle = amber;
+      ctx.lineWidth = 12;
+
+      const corner = 92;
+      const inset = 54;
+
+      // arriba izquierda
+      ctx.beginPath();
+      ctx.moveTo(inset, inset + corner);
+      ctx.lineTo(inset, inset);
+      ctx.lineTo(inset + corner, inset);
+      ctx.stroke();
+
+      // arriba derecha
+      ctx.beginPath();
+      ctx.moveTo(width - inset - corner, inset);
+      ctx.lineTo(width - inset, inset);
+      ctx.lineTo(width - inset, inset + corner);
+      ctx.stroke();
+
+      // abajo izquierda
+      ctx.beginPath();
+      ctx.moveTo(inset, height - inset - corner);
+      ctx.lineTo(inset, height - inset);
+      ctx.lineTo(inset + corner, height - inset);
+      ctx.stroke();
+
+      // abajo derecha
+      ctx.beginPath();
+      ctx.moveTo(width - inset - corner, height - inset);
+      ctx.lineTo(width - inset, height - inset);
+      ctx.lineTo(width - inset, height - inset - corner);
+      ctx.stroke();
+
+      // Logo simple
+      drawCenteredText(ctx, "🍴", width / 2, 150, "72px Arial", amber);
+
+      drawCenteredText(
+        ctx,
+        "Buffet Casa de Dios",
+        width / 2,
+        230,
+        "bold 58px Arial",
+        white
+      );
+
+      drawCenteredText(
+        ctx,
+        "IGLESIA CASA DE DIOS",
+        width / 2,
+        300,
+        "bold 34px Arial",
+        amber
+      );
+
+      // Separador
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(250, 380);
+      ctx.lineTo(950, 380);
+      ctx.stroke();
+
+      drawCenteredText(ctx, "✦", width / 2, 380, "42px Arial", amber);
+
+      // Caja mesa
+      drawRoundedRect(ctx, 350, 445, 500, 210, 42);
+      ctx.fillStyle = "rgba(15,23,42,0.88)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      drawCenteredText(
+        ctx,
+        "MESA RESERVADA",
+        width / 2,
+        510,
+        "bold 34px Arial",
+        muted
+      );
+
+      drawCenteredText(
+        ctx,
+        String(tableToExport),
+        width / 2,
+        590,
+        "bold 92px Arial",
+        amber
+      );
+
+      // Fondo QR
+      drawRoundedRect(ctx, 235, 735, 730, 730, 42);
+      ctx.fillStyle = white;
+      ctx.fill();
+
+      // QR
+      ctx.drawImage(qrImage, 300, 800, 600, 600);
+
+      // URL visible
+      ctx.font = "24px monospace";
+      ctx.fillStyle = "#64748b";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      const visibleUrl =
+        tableUrl.length > 58 ? `${tableUrl.slice(0, 58)}...` : tableUrl;
+
+      ctx.fillText(visibleUrl, width / 2, 1430);
+
+      // Instrucciones
+      drawRoundedRect(ctx, 140, 1515, 920, 210, 36);
+      ctx.fillStyle = "rgba(15,23,42,0.78)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.13)";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      drawCenteredText(
+        ctx,
+        "¿CÓMO REALIZAR TU PEDIDO?",
+        width / 2,
+        1562,
+        "bold 28px Arial",
+        amber
+      );
+
+      ctx.font = "26px Arial";
+      ctx.fillStyle = "rgba(255,255,255,0.84)";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+
+      const instructions = [
+        "1. Escaneá este código QR con tu teléfono móvil.",
+        "2. Explorá nuestra carta e ingresá tus datos.",
+        "3. Realizá tu pago digital o indicá pago en caja.",
+        "4. Te avisaremos para retirar tu pedido en barra.",
+      ];
+
+      instructions.forEach((line, index) => {
+        ctx.fillText(line, 205, 1605 + index * 34);
       });
+
+      const dataUrl = canvas.toDataURL("image/png");
 
       const link = document.createElement("a");
       link.download = `qr-mesa-${tableToExport}.png`;
       link.href = dataUrl;
       link.click();
     } catch (error) {
-      console.error("Error al exportar la tarjeta QR a PNG:", error);
+      console.error("Error al generar PNG de mesa:", error);
       alert("Hubo un problema al generar la tarjeta PNG. Intente nuevamente.");
     } finally {
       setExporting(false);
     }
-  };
-
-  const TableCard = ({
-    tableNumber,
-    hiddenForExport = false,
-  }: {
-    tableNumber: number;
-    hiddenForExport?: boolean;
-  }) => {
-    const tableUrl = getTableUrl(tableNumber);
-    const qrUrl = getQrImageUrl(tableNumber);
-
-    return (
-      <div
-        ref={hiddenForExport ? exportCardRef : previewCardRef}
-        id={hiddenForExport ? `export-card-table-${tableNumber}` : "printable-table-card"}
-        className="bg-[#0c1222] border-4 border-amber-400 rounded-3xl p-6 shadow-xl max-w-sm w-full flex flex-col items-center gap-5 text-center relative overflow-hidden text-white"
-        data-table-number={tableNumber}
-        data-table-url={tableUrl}
-      >
-        <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-amber-400 translate-x-1.5 translate-y-1.5" />
-        <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-amber-400 -translate-x-1.5 translate-y-1.5" />
-        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-amber-400 translate-x-1.5 -translate-y-1.5" />
-        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-amber-400 -translate-x-1.5 -translate-y-1.5" />
-
-        <div className="flex flex-col items-center gap-1">
-          <Utensils className="w-6 h-6 text-amber-400" />
-          <h2 className="font-display font-bold text-base text-white leading-none">
-            Buffet Casa de Dios
-          </h2>
-          <span className="text-[10px] text-amber-400 font-bold uppercase tracking-widest leading-none mt-1.5">
-            Iglesia Casa de Dios
-          </span>
-        </div>
-
-        <div className="w-2/3 h-px bg-white/10 relative flex justify-center items-center">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400 bg-[#0c1222]" />
-        </div>
-
-        <div className="bg-[#0f172a]/80 text-white px-5 py-2.5 rounded-2xl flex flex-col items-center shadow-md border border-white/10">
-          <span className="text-[10px] font-bold uppercase tracking-wider font-display text-white/50">
-            MESA RESERVADA
-          </span>
-          <span className="text-3xl font-black font-mono leading-none mt-0.5 text-amber-400">
-            {tableNumber}
-          </span>
-        </div>
-
-        <div className="p-3 bg-white border border-white/10 rounded-2xl flex flex-col items-center gap-2">
-          <img
-            key={`qr-img-${tableNumber}-${tableUrl}`}
-            src={qrUrl}
-            alt={`QR Mesa ${tableNumber}`}
-            className="w-44 h-44 object-contain rounded-xl bg-white shadow-inner"
-            crossOrigin="anonymous"
-          />
-
-          <span
-            className="text-[9px] text-slate-400 font-mono select-all truncate max-w-[200px]"
-            title={tableUrl}
-          >
-            {tableUrl}
-          </span>
-        </div>
-
-        <div className="flex flex-col gap-2 bg-[#0f172a]/60 p-3 rounded-2xl border border-white/10">
-          <h4 className="text-[10px] font-bold text-amber-400 uppercase tracking-wider font-display flex items-center justify-center gap-1">
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>¿CÓMO REALIZAR TU PEDIDO?</span>
-          </h4>
-
-          <ol className="text-[10px] text-white/80 text-left list-decimal pl-4 flex flex-col gap-1 leading-normal font-medium">
-            <li>Escaneá este código QR con tu teléfono móvil.</li>
-            <li>Explorá nuestra carta e ingresá tus datos en el carrito.</li>
-            <li>Realizá tu pago digital o indicalo para pagar en caja.</li>
-            <li>¡Listo! Te avisaremos para que retires tu pedido en la barra.</li>
-          </ol>
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -323,22 +415,66 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
       </div>
 
       <div className="flex-1 flex justify-center items-center bg-black/40 backdrop-blur-md p-6 rounded-3xl border-2 border-dashed border-white/10">
-        <TableCard tableNumber={selectedTable} />
-      </div>
+        <div className="bg-[#0c1222] border-4 border-amber-400 rounded-3xl p-6 shadow-xl max-w-sm w-full flex flex-col items-center gap-5 text-center relative overflow-hidden text-white">
+          <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-amber-400 translate-x-1.5 translate-y-1.5" />
+          <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-amber-400 -translate-x-1.5 translate-y-1.5" />
+          <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-amber-400 translate-x-1.5 -translate-y-1.5" />
+          <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-amber-400 -translate-x-1.5 -translate-y-1.5" />
 
-      <div
-        style={{
-          position: "fixed",
-          left: "-10000px",
-          top: "0",
-          width: "384px",
-          height: "auto",
-          opacity: 1,
-          pointerEvents: "none",
-          zIndex: -1,
-        }}
-      >
-        <TableCard tableNumber={selectedTable} hiddenForExport />
+          <div className="flex flex-col items-center gap-1">
+            <Utensils className="w-6 h-6 text-amber-400" />
+            <h2 className="font-display font-bold text-base text-white leading-none">
+              Buffet Casa de Dios
+            </h2>
+            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-widest leading-none mt-1.5">
+              Iglesia Casa de Dios
+            </span>
+          </div>
+
+          <div className="w-2/3 h-px bg-white/10 relative flex justify-center items-center">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 bg-[#0c1222]" />
+          </div>
+
+          <div className="bg-[#0f172a]/80 text-white px-5 py-2.5 rounded-2xl flex flex-col items-center shadow-md border border-white/10">
+            <span className="text-[10px] font-bold uppercase tracking-wider font-display text-white/50">
+              MESA RESERVADA
+            </span>
+            <span className="text-3xl font-black font-mono leading-none mt-0.5 text-amber-400">
+              {selectedTable}
+            </span>
+          </div>
+
+          <div className="p-3 bg-white border border-white/10 rounded-2xl flex flex-col items-center gap-2">
+            <img
+              key={`preview-qr-${selectedTable}-${selectedTableUrl}`}
+              src={selectedQrImageUrl}
+              alt={`QR Mesa ${selectedTable}`}
+              className="w-44 h-44 object-contain rounded-xl bg-white shadow-inner"
+              crossOrigin="anonymous"
+            />
+
+            <span
+              className="text-[9px] text-slate-400 font-mono select-all truncate max-w-[200px]"
+              title={selectedTableUrl}
+            >
+              {selectedTableUrl}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-2 bg-[#0f172a]/60 p-3 rounded-2xl border border-white/10">
+            <h4 className="text-[10px] font-bold text-amber-400 uppercase tracking-wider font-display flex items-center justify-center gap-1">
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>¿CÓMO REALIZAR TU PEDIDO?</span>
+            </h4>
+
+            <ol className="text-[10px] text-white/80 text-left list-decimal pl-4 flex flex-col gap-1 leading-normal font-medium">
+              <li>Escaneá este código QR con tu teléfono móvil.</li>
+              <li>Explorá nuestra carta e ingresá tus datos en el carrito.</li>
+              <li>Realizá tu pago digital o indicalo para pagar en caja.</li>
+              <li>¡Listo! Te avisaremos para que retires tu pedido en la barra.</li>
+            </ol>
+          </div>
+        </div>
       </div>
     </div>
   );
