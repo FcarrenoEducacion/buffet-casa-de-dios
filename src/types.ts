@@ -42,6 +42,11 @@ export interface Order {
   cashSessionId?: string;
   paidAt?: string;
   approvedAt?: string;
+  dismissedAt?: string;
+  dismissedBy?: string;
+  dismissedReason?: string;
+  hasCreditNote?: boolean;
+  creditNoteAmount?: number;
   notes?: string;
 }
 
@@ -71,7 +76,7 @@ export interface CashMovement {
   id: string;
   cashSessionId: string;
   orderId?: string;
-  type: 'opening' | 'sale' | 'manual_sale' | 'refund' | 'adjustment' | 'closing';
+  type: 'opening' | 'sale' | 'manual_sale' | 'refund' | 'adjustment' | 'credit_note' | 'closing' | string;
   paymentMethod?: 'efectivo' | 'transferencia' | 'qr' | 'tarjeta';
   amount: number;
   description: string;

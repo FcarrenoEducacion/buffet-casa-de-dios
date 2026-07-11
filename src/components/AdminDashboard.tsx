@@ -106,6 +106,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [closingNote, setClosingNote] = useState<string>('');
   const [showDifferencesWarning, setShowDifferencesWarning] = useState<boolean>(false);
   const [differencesDetails, setDifferencesDetails] = useState<any>(null);
+  const [closingMovements, setClosingMovements] = useState<any[]>([]);
+  const [isLoadingMovements, setIsLoadingMovements] = useState<boolean>(false);
 
   // Tab state for the admin section
   const [adminTab, setAdminTab] = useState<'caja' | 'menu' | 'qr' | 'supabase'>('caja');
@@ -333,6 +335,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (res.ok) {
         const data = await res.json();
         setCurrentSession(data.session);
+        if (Array.isArray(data.movements)) {
+          setClosingMovements(data.movements);
+        }
       }
     } catch (err) {
       console.error("Error fetching current session:", err);
@@ -340,6 +345,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsLoadingSession(false);
     }
   };
+
+  const fetchClosingMovements = async (sessionId?: string) => {
+    const id = sessionId || currentSession?.id;
+    if (!id) return;
+    setIsLoadingMovements(true);
+    try {
+      const res = await fetch(`/api/cash-movements?sessionId=${encodeURIComponent(id)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setClosingMovements(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error("Error fetching cash movements:", err);
+    } finally {
+      setIsLoadingMovements(false);
+    }
+  };
+
+  const openClosingModal = async () => {
+    await fetchCurrentSession();
+    const res = await fetch('/api/cash-session/current');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.session) {
+        setCurrentSession(data.session);
+        setClosingMovements(Array.isArray(data.movements) ? data.movements : []);
+        setTotalTransferInformed(String(data.session.totalTransfer || 0));
+        setTotalQrInformed(String(data.session.totalQr || 0));
+        setTotalCardInformed(String(data.session.totalCard || 0));
+      }
+    }
+    setIsClosingModalOpen(true);
+  };
+
+
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -385,10 +425,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
-    const expected_cash = currentSession?.expectedCash || 0;
-    const expected_transfer = currentSession?.totalTransfer || 0;
-    const expected_qr = currentSession?.totalQr || 0;
-    const expected_card = currentSession?.totalCard || 0;
+    const liveRes = await fetch('/api/cash-session/current');
+    let liveSession = currentSession;
+    if (liveRes.ok) {
+      const liveData = await liveRes.json();
+      if (liveData.session) {
+        liveSession = liveData.session;
+        setCurrentSession(liveData.session);
+        if (Array.isArray(liveData.movements)) setClosingMovements(liveData.movements);
+      }
+    }
+
+    const expected_cash = liveSession?.expectedCash || 0;
+    const expected_transfer = liveSession?.totalTransfer || liveSession?.expectedTransfer || 0;
+    const expected_qr = liveSession?.totalQr || liveSession?.expectedQr || 0;
+    const expected_card = liveSession?.totalCard || liveSession?.expectedCard || 0;
 
     const counted_cash = Number(countedCash) || 0;
     const dec_transfer = Number(totalTransferInformed) || 0;
@@ -429,13 +480,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           totalQr: dec_qr,
           totalCard: dec_card,
           closingNote: closingNote.trim(),
-          closingResult: hasDiffs ? 'with_differences' : 'perfect'
+          closingResult: hasDiffs ? 'with_differences' : 'perfect',
+          forceClose,
+          authorizedBy: closingResponsible.trim()
         })
       });
       const data = await res.json();
+
+      if (res.status === 409 && data.reconciliation) {
+        const r = data.reconciliation;
+        setDifferencesDetails({
+          cash: { expected: r.expectedCash || 0, declared: r.declaredCash || counted_cash, diff: r.differenceCash || 0 },
+          transfer: { expected: r.expectedTransfer || 0, declared: r.declaredTransfer || dec_transfer, diff: r.differenceTransfer || 0 },
+          qr: { expected: r.expectedQr || 0, declared: r.declaredQr || dec_qr, diff: r.differenceQr || 0 },
+          card: { expected: r.expectedCard || 0, declared: r.declaredCard || dec_card, diff: r.differenceCard || 0 }
+        });
+        setShowDifferencesWarning(true);
+        alert(data.error || "Hay diferencias en el arqueo. Revise los montos o cree una nota de crédito/ajuste.");
+        return;
+      }
+
       if (res.ok) {
         const closedSess = data.session;
-        // Fetch full report immediately to show summary modal
         const repRes = await fetch(`/api/cash-session/${closedSess.id}/report`);
         if (repRes.ok) {
           const repData = await repRes.json();
@@ -446,7 +512,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setIsClosingModalOpen(false);
         setShowDifferencesWarning(false);
         setDifferencesDetails(null);
-        // Reset closure inputs
+        setClosingMovements([]);
         setCountedCash('');
         setTotalTransferInformed('');
         setTotalQrInformed('');
@@ -459,6 +525,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch (err) {
       console.error(err);
       alert("Error de conexión al cerrar caja.");
+    }
+  };
+
+  const handleCreateCreditNotePrompt = async () => {
+    const orderId = window.prompt('Código del pedido para nota de crédito / ajuste (ej: OP-1234):');
+    if (!orderId) return;
+    const amount = window.prompt('Monto a ajustar/anular:', '');
+    if (!amount || Number(amount) <= 0) return;
+    const method = window.prompt('Medio afectado: efectivo, transferencia, qr o tarjeta', 'qr') || 'qr';
+    const reason = window.prompt('Motivo obligatorio de la nota de crédito:', 'Error de facturación / pedido mal cargado') || '';
+    if (!reason.trim()) {
+      alert('Debe cargar un motivo.');
+      return;
+    }
+    const adminPassword = window.prompt('Clave administrativa para autorizar la nota de crédito:');
+    if (!adminPassword) return;
+
+    try {
+      const res = await fetch(`/api/orders/${orderId.trim()}/credit-note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminPassword,
+          amount: Number(amount),
+          paymentMethod: method,
+          reason,
+          createdBy: closingResponsible || currentSession?.openedBy || 'Rita'
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('Nota de crédito / ajuste creado correctamente. Vuelva a revisar el arqueo.');
+        await fetchCurrentSession();
+        await fetchClosingMovements();
+        setShowDifferencesWarning(false);
+      } else {
+        alert(data.error || 'No se pudo crear la nota de crédito.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error de conexión al crear nota de crédito.');
     }
   };
 
@@ -2025,11 +2132,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onClick={() => {
                       setClosingResponsible(currentSession.openedBy || 'Rita');
                       setCountedCash('');
-                      setTotalTransferInformed('');
-                      setTotalQrInformed('');
-                      setTotalCardInformed('');
+                      setTotalTransferInformed(String(currentSession.totalTransfer || 0));
+                      setTotalQrInformed(String(currentSession.totalQr || 0));
+                      setTotalCardInformed(String(currentSession.totalCard || 0));
                       setClosingNote('');
-                      setIsClosingModalOpen(true);
+                      openClosingModal();
                     }}
                     className="flex-1 md:flex-none bg-rose-500 hover:bg-rose-400 text-white px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md shadow-rose-500/15 cursor-pointer"
                   >
@@ -3788,6 +3895,45 @@ CREATE TABLE IF NOT EXISTS cash_movements (
               </div>
             </div>
 
+            <div className="bg-black/25 border border-white/10 rounded-2xl p-4 flex flex-col gap-3 max-h-56 overflow-y-auto">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-[10px] uppercase font-bold text-amber-400 tracking-wider font-mono">Movimientos del día para revisar antes de cerrar</h4>
+                <button
+                  type="button"
+                  onClick={() => fetchClosingMovements()}
+                  className="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded-lg border border-white/10 text-white/70"
+                >
+                  Actualizar
+                </button>
+              </div>
+              {isLoadingMovements ? (
+                <p className="text-[11px] text-white/50">Cargando movimientos...</p>
+              ) : closingMovements.length === 0 ? (
+                <p className="text-[11px] text-white/50">No hay movimientos registrados todavía.</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {closingMovements.slice(0, 30).map((mov: any) => (
+                    <div key={mov.id} className="grid grid-cols-[55px_1fr_auto] items-center gap-2 bg-white/5 border border-white/5 rounded-xl px-2.5 py-2 text-[10px]">
+                      <span className="text-white/45 font-mono">
+                        {mov.createdAt ? new Date(mov.createdAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '--:--'}
+                      </span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-white/80 font-bold truncate">
+                          {mov.type === 'sale' ? 'Venta' : mov.type === 'credit_note' ? 'Nota crédito' : mov.type === 'opening' ? 'Apertura' : mov.type === 'closing' ? 'Cierre' : mov.type}
+                          {mov.orderId ? ` · ${mov.orderId}` : ''}
+                          {mov.paymentMethod ? ` · ${mov.paymentMethod}` : ''}
+                        </span>
+                        <span className="text-white/35 truncate">{mov.description || 'Sin descripción'}</span>
+                      </div>
+                      <span className={`font-mono font-black ${Number(mov.amount || 0) < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        ${Number(mov.amount || 0).toLocaleString('es-AR')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <form onSubmit={handleCloseSession} className="flex flex-col gap-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
@@ -3944,6 +4090,14 @@ CREATE TABLE IF NOT EXISTS cash_movements (
                 className="bg-[#0f172a]/80 border border-rose-500/30 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 text-white min-h-[90px] font-medium"
               />
             </div>
+
+            <button
+              type="button"
+              onClick={handleCreateCreditNotePrompt}
+              className="w-full bg-amber-400 hover:bg-amber-300 text-black py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all text-center flex items-center justify-center gap-1 shadow-lg shadow-amber-500/10 cursor-pointer"
+            >
+              Crear nota de crédito / ajuste
+            </button>
 
             <div className="grid grid-cols-2 gap-3 mt-2">
               <button
