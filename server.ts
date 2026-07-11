@@ -65,9 +65,11 @@ app.use(express.json({ limit: "10mb" }));
 // Files for persistence
 const DISHES_FILE = path.join(process.cwd(), "dishes.json");
 const CONFIG_FILE = path.join(process.cwd(), "config.json");
+const canWriteLocalFiles = !process.env.VERCEL;
 
 // Helper to save dishes
 function saveDishes(dishesList: any[]) {
+  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(DISHES_FILE, JSON.stringify(dishesList, null, 2), "utf-8");
   } catch (e) {
@@ -618,6 +620,7 @@ const MOVEMENTS_FILE = path.join(process.cwd(), "cash_movements.json");
 
 // Helper functions for file-based state saving and loading
 function saveOrders(ordersList: any[]) {
+  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(ORDERS_FILE, JSON.stringify(ordersList, null, 2), "utf-8");
   } catch (e) {
@@ -637,6 +640,7 @@ function loadSessions(): any[] {
 }
 
 function saveSessions(sessionsList: any[]) {
+  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsList, null, 2), "utf-8");
   } catch (e) {
@@ -656,6 +660,7 @@ function loadMovements(): any[] {
 }
 
 function saveMovements(movementsList: any[]) {
+  if (!canWriteLocalFiles) return;
   try {
     fs.writeFileSync(MOVEMENTS_FILE, JSON.stringify(movementsList, null, 2), "utf-8");
   } catch (e) {
@@ -1319,16 +1324,19 @@ async function getOpenCashSession(preferredSessionId?: string | null): Promise<a
       const { data, error } = await supabase
         .from("cash_sessions")
         .select("*")
-        .in("status", openStatuses)
         .order("opened_at", { ascending: false })
-        .limit(1);
+        .limit(10);
 
       if (error) {
         console.error("[OPEN CASH SESSION] Error Supabase:", error.message);
       }
 
       if (!error && data && data.length > 0) {
-        return mapDbToSession(data[0]);
+        const openRow = data.find((row: any) => openStatuses.includes(normalizeSessionStatus(row.status)));
+        if (openRow) {
+          return mapDbToSession(openRow);
+        }
+        console.warn("[OPEN CASH SESSION] Se encontraron sesiones, pero ninguna está abierta:", data.map((row: any) => ({ id: row.id, status: row.status })));
       }
     } catch (err: any) {
       console.error("[OPEN CASH SESSION] Error inesperado:", err.message || err);
@@ -2033,42 +2041,20 @@ function getCalculatedSession(session: any, ordersList: any[], movementsList: an
 
 // GET /api/cash-session/current
 app.get("/api/cash-session/current", async (req, res) => {
-  let current = null;
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("cash_sessions")
-        .select("*")
-        .eq("status", "open")
-        .single();
-      if (!error && data) {
-        current = mapDbToSession(data);
-      }
-    } catch (err: any) {
-      console.log("ℹ️ No open session found in Supabase or error:", err.message);
-    }
-  }
-
-  if (!current) {
-    const sessions = loadSessions();
-    current = sessions.find(s => s.status === 'open');
-  }
+  const current = await getOpenCashSession();
 
   if (!current) {
     return res.json({ session: null });
   }
 
-  // Ensure this active session is synced to Supabase
   await ensureSessionSynced(current);
 
-  // Self-healing: Find any paid orders without cashSessionId that were paid around/after session opened,
-  // and associate them with the current open session.
+  // Self-healing: link paid local orders without session to the current open session.
   let healedAny = false;
   orders.forEach(o => {
-    if ((o.paymentStatus === 'pagado' || o.paymentStatus === 'paid') && !o.cashSessionId) {
+    if ((o.paymentStatus === "pagado" || o.paymentStatus === "paid") && !o.cashSessionId) {
       const orderTime = new Date(o.paidAt || o.createdAt).getTime();
       const sessionTime = new Date(current.openedAt).getTime();
-      // If paid/created within 24 hours of session opened, or after session opened:
       if (Math.abs(orderTime - sessionTime) < 24 * 60 * 60 * 1000) {
         o.cashSessionId = current.id;
         healedAny = true;
@@ -2092,44 +2078,40 @@ app.get("/api/cash-session/current", async (req, res) => {
     }
   }
 
-  // Calculate session financials based on current live orders and movements
-  let sessionOrders = [];
-  let sessionMovements = [];
+  let sessionOrders: any[] = [];
+  let sessionMovements: any[] = [];
 
   if (supabase) {
     try {
-      const { data: dbOrders } = await supabase
+      const { data: dbOrders, error: ordersError } = await supabase
         .from("orders")
         .select("*")
         .eq("cash_session_id", current.id)
         .in("payment_status", ["paid", "pagado"]);
-      
-      const { data: dbMovements } = await supabase
+
+      const { data: dbMovements, error: movementsError } = await supabase
         .from("cash_movements")
         .select("*")
         .eq("cash_session_id", current.id);
 
-      if (dbOrders) {
-        sessionOrders = dbOrders.map(o => mapDbToOrder(o, [])); // simple headers
-      }
-      if (dbMovements) {
-        sessionMovements = dbMovements.map(mapDbToMovement);
-      }
+      if (ordersError) console.error("[CURRENT SESSION] Error consultando pedidos:", ordersError.message);
+      if (movementsError) console.error("[CURRENT SESSION] Error consultando movimientos:", movementsError.message);
+
+      if (dbOrders) sessionOrders = dbOrders.map(o => mapDbToOrder(o, []));
+      if (dbMovements) sessionMovements = dbMovements.map(mapDbToMovement);
     } catch (err) {
       console.error("Error fetching live calculations from Supabase:", err);
     }
   }
 
-  // Fallback to local files if Supabase is empty or failed
   if (!sessionOrders.length) {
-    sessionOrders = orders.filter(o => o.cashSessionId === current.id && o.paymentStatus === 'pagado');
+    sessionOrders = orders.filter(o => o.cashSessionId === current.id && (o.paymentStatus === "pagado" || o.paymentStatus === "paid"));
   }
   if (!sessionMovements.length) {
     const movements = loadMovements();
     sessionMovements = movements.filter(m => m.cashSessionId === current.id);
   }
 
-  // Perform calculations
   let totalCash = 0;
   let totalTransfer = 0;
   let totalQr = 0;
@@ -2137,29 +2119,19 @@ app.get("/api/cash-session/current", async (req, res) => {
   let totalSales = 0;
 
   sessionOrders.forEach(o => {
-    const amount = o.total || 0;
+    const amount = Number(o.total || 0);
     totalSales += amount;
-    const method = String(o.paymentMethod || "").toLowerCase();
-    if (method === 'efectivo' || method === 'efectivo_caja') {
-      totalCash += amount;
-    } else if (method === 'transferencia' || method === 'pago_movil') {
-      totalTransfer += amount;
-    } else if (method === 'qr' || method === 'qr_caja') {
-      totalQr += amount;
-    } else if (method === 'tarjeta' || method === 'tarjeta_caja' || method === 'simulado_tarjeta') {
-      totalCard += amount;
-    } else {
-      totalCash += amount;
-    }
+    const method = normalizePaymentMethod(o.paymentMethod);
+    if (method === "efectivo") totalCash += amount;
+    else if (method === "transferencia") totalTransfer += amount;
+    else if (method === "qr") totalQr += amount;
+    else if (method === "tarjeta") totalCard += amount;
   });
 
-  let expectedCash = current.openingAmount;
+  let expectedCash = Number(current.openingAmount || 0);
   sessionMovements.forEach(m => {
-    if (m.type === 'adjustment') {
-      expectedCash += m.amount;
-    } else if (m.type === 'refund') {
-      expectedCash -= m.amount;
-    }
+    if (m.type === "adjustment") expectedCash += Number(m.amount || 0);
+    else if (m.type === "refund") expectedCash -= Number(m.amount || 0);
   });
   expectedCash += totalCash;
 

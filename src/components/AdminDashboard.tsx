@@ -2247,6 +2247,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {order.paymentStatus === 'pendiente' ? (
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               <button
+                                type="button"
                                 onClick={() => setSelectedPayOrder(order)}
                                 disabled={payingOrderId === order.id || dismissingOrderId === order.id}
                                 className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-black hover:scale-[1.02] py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-500/10 transition-all font-display animate-pulse"
@@ -2255,6 +2256,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <span>Confirmar Pago</span>
                               </button>
                               <button
+                                type="button"
                                 onClick={() => handleDismissOrder(order)}
                                 disabled={payingOrderId === order.id || dismissingOrderId === order.id}
                                 className="w-full bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed text-rose-300 border border-rose-500/30 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-all font-display"
