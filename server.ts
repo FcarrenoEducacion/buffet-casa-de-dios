@@ -2907,7 +2907,7 @@ app.post("/api/orders/:id/dismiss", async (req, res) => {
     const expectedPassword =
       process.env.ADMIN_ACTION_PASSWORD ||
       process.env.ADMIN_PASSWORD ||
-      "casa123";
+      "Buffet@CasaDeDios2026!";
 
     if (String(adminPassword) !== String(expectedPassword)) {
       return res.status(401).json({
