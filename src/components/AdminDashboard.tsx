@@ -83,6 +83,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedPayOrder, setSelectedPayOrder] = useState<any>(null);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [dismissingOrderId, setDismissingOrderId] = useState<string | null>(null);
+  const [locallyDismissedOrderIds, setLocallyDismissedOrderIds] = useState<string[]>([]);
 
   // Manual Order Form States
   const [manualCustomer, setManualCustomer] = useState<string>('');
@@ -680,10 +681,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleDismissOrder = async (order: any) => {
     if (dismissingOrderId) return;
 
+    if (!order?.id) {
+      alert('No se pudo identificar el pedido.');
+      return;
+    }
+
     const adminPassword = window.prompt(`Ingrese la clave administrativa para desestimar el pedido ${order.id}:`);
     if (!adminPassword) return;
 
+    if (adminPassword !== 'Buffet@CasaDeDios2026!') {
+      alert('Clave administrativa incorrecta.');
+      return;
+    }
+
     const reason = window.prompt('Motivo de desestimación del pedido:', 'Cliente desistió / pedido cargado por error') || '';
+    if (!reason.trim() || reason.trim().length < 3) {
+      alert('Debe ingresar un motivo válido para desestimar el pedido.');
+      return;
+    }
 
     setDismissingOrderId(order.id);
     try {
@@ -692,15 +707,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           adminPassword,
-          reason,
+          reason: reason.trim(),
           dismissedBy: currentSession?.openedBy || 'Rita'
         })
       });
-      const data = await res.json();
+
+      const data = await res.json().catch(() => ({}));
+
       if (res.ok) {
+        // Ocultamos inmediatamente el pedido de la lista visible aunque el refresh tarde o el backend devuelva cache.
+        setLocallyDismissedOrderIds(prev => prev.includes(order.id) ? prev : [...prev, order.id]);
+
         alert(`Pedido ${order.id} desestimado correctamente.`);
-        if (onRefreshOrders) onRefreshOrders();
-        fetchCurrentSession();
+
+        await fetchCurrentSession();
+        if (onRefreshOrders) {
+          await onRefreshOrders();
+        }
       } else {
         alert(data.error || 'No se pudo desestimar el pedido.');
       }
@@ -1898,15 +1921,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const lowStockDishes = dishes.filter(d => (d.stock !== undefined ? d.stock : 20) <= 4);
 
   // Cashier filtering helper logic
-  const filteredCajaOrders = orders.filter(order => {
-    const query = searchQuery.toLowerCase().trim();
-    const matchesSearch = query === '' || 
-      order.id.toLowerCase().includes(query) ||
-      order.customerName.toLowerCase().includes(query) ||
-      order.tableNumber.toLowerCase().includes(query);
+  const isDismissedOrder = (order: any) => {
+    const status = String(order?.status || '').toLowerCase();
+    const paymentStatus = String(order?.paymentStatus || (order as any)?.payment_status || '').toLowerCase();
+    const dismissedReason = String((order as any)?.dismissedReason || (order as any)?.dismissed_reason || '').trim();
 
-    if (paymentFilter === 'todos') return matchesSearch;
-    return order.paymentStatus === paymentFilter && matchesSearch;
+    return (
+      locallyDismissedOrderIds.includes(order?.id) ||
+      status === 'dismissed' ||
+      status === 'cancelled' ||
+      status === 'canceled' ||
+      status === 'desestimado' ||
+      paymentStatus === 'cancelled' ||
+      paymentStatus === 'canceled' ||
+      paymentStatus === 'desestimado' ||
+      dismissedReason.length > 0
+    );
+  };
+
+  const isPaidOrder = (order: any) => {
+    const paymentStatus = String(order?.paymentStatus || (order as any)?.payment_status || '').toLowerCase();
+    return paymentStatus === 'pagado' || paymentStatus === 'paid';
+  };
+
+  const isPendingOrder = (order: any) => {
+    return !isDismissedOrder(order) && !isPaidOrder(order);
+  };
+
+  const filteredCajaOrders = orders.filter(order => {
+    // Los desestimados no se muestran en la grilla principal de Caja, ni en Pendientes ni en Ver Todos.
+    if (isDismissedOrder(order)) return false;
+
+    const query = searchQuery.toLowerCase().trim();
+    const matchesSearch = query === '' ||
+      String(order.id || '').toLowerCase().includes(query) ||
+      String(order.customerName || '').toLowerCase().includes(query) ||
+      String(order.tableNumber || '').toLowerCase().includes(query);
+
+    if (!matchesSearch) return false;
+
+    if (paymentFilter === 'todos') return true;
+    if (paymentFilter === 'pagado') return isPaidOrder(order);
+    if (paymentFilter === 'pendiente') return isPendingOrder(order);
+
+    return true;
   });
 
   const renderPaymentMethodBadge = (method: string) => {
