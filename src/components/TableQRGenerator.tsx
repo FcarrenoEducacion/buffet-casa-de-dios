@@ -148,43 +148,39 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
       const corner = 92;
       const inset = 54;
 
-      // arriba izquierda
       ctx.beginPath();
       ctx.moveTo(inset, inset + corner);
       ctx.lineTo(inset, inset);
       ctx.lineTo(inset + corner, inset);
       ctx.stroke();
 
-      // arriba derecha
       ctx.beginPath();
       ctx.moveTo(width - inset - corner, inset);
       ctx.lineTo(width - inset, inset);
       ctx.lineTo(width - inset, inset + corner);
       ctx.stroke();
 
-      // abajo izquierda
       ctx.beginPath();
       ctx.moveTo(inset, height - inset - corner);
       ctx.lineTo(inset, height - inset);
       ctx.lineTo(inset + corner, height - inset);
       ctx.stroke();
 
-      // abajo derecha
       ctx.beginPath();
       ctx.moveTo(width - inset - corner, height - inset);
       ctx.lineTo(width - inset, height - inset);
       ctx.lineTo(width - inset, height - inset - corner);
       ctx.stroke();
 
-      // Logo simple
-      drawCenteredText(ctx, "🍴", width / 2, 150, "72px Arial", amber);
+      // Header
+      drawCenteredText(ctx, "🍴", width / 2, 130, "70px Arial", amber);
 
       drawCenteredText(
         ctx,
         "Buffet Casa de Dios",
         width / 2,
-        230,
-        "bold 58px Arial",
+        218,
+        "bold 60px Arial",
         white
       );
 
@@ -192,23 +188,23 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
         ctx,
         "IGLESIA CASA DE DIOS",
         width / 2,
-        300,
+        292,
         "bold 34px Arial",
         amber
       );
 
       // Separador
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(250, 380);
-      ctx.lineTo(950, 380);
+      ctx.moveTo(250, 382);
+      ctx.lineTo(950, 382);
       ctx.stroke();
 
-      drawCenteredText(ctx, "✦", width / 2, 380, "42px Arial", amber);
+      drawCenteredText(ctx, "✦", width / 2, 382, "44px Arial", amber);
 
       // Caja mesa
-      drawRoundedRect(ctx, 350, 445, 500, 210, 42);
+      drawRoundedRect(ctx, 335, 450, 530, 220, 44);
       ctx.fillStyle = "rgba(15,23,42,0.88)";
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.16)";
@@ -219,8 +215,8 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
         ctx,
         "MESA RESERVADA",
         width / 2,
-        510,
-        "bold 34px Arial",
+        520,
+        "bold 36px Arial",
         muted
       );
 
@@ -228,49 +224,59 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
         ctx,
         String(tableToExport),
         width / 2,
-        590,
+        607,
         "bold 92px Arial",
         amber
       );
 
-      // Fondo QR
-      drawRoundedRect(ctx, 235, 735, 730, 730, 42);
+      // QR más chico para ganar espacio inferior
+      const qrCardX = 300;
+      const qrCardY = 735;
+      const qrCardSize = 600;
+      const qrImageX = 355;
+      const qrImageY = 790;
+      const qrImageSize = 490;
+
+      drawRoundedRect(ctx, qrCardX, qrCardY, qrCardSize, qrCardSize, 38);
       ctx.fillStyle = white;
       ctx.fill();
 
-      // QR
-      ctx.drawImage(qrImage, 300, 800, 600, 600);
+      ctx.drawImage(qrImage, qrImageX, qrImageY, qrImageSize, qrImageSize);
 
-      // URL visible
-      ctx.font = "24px monospace";
+      ctx.font = "21px monospace";
       ctx.fillStyle = "#64748b";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
       const visibleUrl =
-        tableUrl.length > 58 ? `${tableUrl.slice(0, 58)}...` : tableUrl;
+        tableUrl.length > 62 ? `${tableUrl.slice(0, 62)}...` : tableUrl;
 
-      ctx.fillText(visibleUrl, width / 2, 1430);
+      ctx.fillText(visibleUrl, width / 2, qrCardY + qrCardSize - 34);
 
-      // Instrucciones
-      drawRoundedRect(ctx, 140, 1515, 920, 210, 36);
+      // Instrucciones agrandadas
+      const instructionX = 110;
+      const instructionY = 1415;
+      const instructionW = 980;
+      const instructionH = 285;
+
+      drawRoundedRect(ctx, instructionX, instructionY, instructionW, instructionH, 38);
       ctx.fillStyle = "rgba(15,23,42,0.78)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.13)";
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.lineWidth = 4;
       ctx.stroke();
 
       drawCenteredText(
         ctx,
         "¿CÓMO REALIZAR TU PEDIDO?",
         width / 2,
-        1562,
-        "bold 28px Arial",
+        instructionY + 58,
+        "bold 36px Arial",
         amber
       );
 
-      ctx.font = "26px Arial";
-      ctx.fillStyle = "rgba(255,255,255,0.84)";
+      ctx.font = "34px Arial";
+      ctx.fillStyle = "rgba(255,255,255,0.90)";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
 
@@ -282,7 +288,7 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
       ];
 
       instructions.forEach((line, index) => {
-        ctx.fillText(line, 205, 1605 + index * 34);
+        ctx.fillText(line, 178, instructionY + 108 + index * 46);
       });
 
       const dataUrl = canvas.toDataURL("image/png");
