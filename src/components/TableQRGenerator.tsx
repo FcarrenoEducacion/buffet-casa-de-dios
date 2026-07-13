@@ -130,7 +130,6 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
       const amber = "#fbbf24";
       const white = "#ffffff";
       const muted = "rgba(255,255,255,0.72)";
-      const cardDark = "#0f172a";
 
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, width, height);
@@ -148,24 +147,28 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
       const corner = 92;
       const inset = 54;
 
+      // Arriba izquierda
       ctx.beginPath();
       ctx.moveTo(inset, inset + corner);
       ctx.lineTo(inset, inset);
       ctx.lineTo(inset + corner, inset);
       ctx.stroke();
 
+      // Arriba derecha
       ctx.beginPath();
       ctx.moveTo(width - inset - corner, inset);
       ctx.lineTo(width - inset, inset);
       ctx.lineTo(width - inset, inset + corner);
       ctx.stroke();
 
+      // Abajo izquierda
       ctx.beginPath();
       ctx.moveTo(inset, height - inset - corner);
       ctx.lineTo(inset, height - inset);
       ctx.lineTo(inset + corner, height - inset);
       ctx.stroke();
 
+      // Abajo derecha
       ctx.beginPath();
       ctx.moveTo(width - inset - corner, height - inset);
       ctx.lineTo(width - inset, height - inset);
@@ -229,7 +232,7 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
         amber
       );
 
-      // QR más chico para ganar espacio inferior
+      // QR un poco más chico para ganar espacio inferior
       const qrCardX = 300;
       const qrCardY = 735;
       const qrCardSize = 600;
@@ -253,13 +256,21 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
 
       ctx.fillText(visibleUrl, width / 2, qrCardY + qrCardSize - 34);
 
-      // Instrucciones agrandadas
-      const instructionX = 110;
-      const instructionY = 1415;
-      const instructionW = 980;
-      const instructionH = 285;
+      // Instrucciones: mismas formas y colores, letras apenas más grandes
+      const instructionX = 105;
+      const instructionY = 1405;
+      const instructionW = 990;
+      const instructionH = 300;
 
-      drawRoundedRect(ctx, instructionX, instructionY, instructionW, instructionH, 38);
+      drawRoundedRect(
+        ctx,
+        instructionX,
+        instructionY,
+        instructionW,
+        instructionH,
+        38
+      );
+
       ctx.fillStyle = "rgba(15,23,42,0.78)";
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.15)";
@@ -270,13 +281,13 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
         ctx,
         "¿CÓMO REALIZAR TU PEDIDO?",
         width / 2,
-        instructionY + 58,
-        "bold 36px Arial",
+        instructionY + 62,
+        "bold 40px Arial",
         amber
       );
 
-      ctx.font = "34px Arial";
-      ctx.fillStyle = "rgba(255,255,255,0.90)";
+      ctx.font = "38px Arial";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
 
@@ -288,7 +299,7 @@ export const TableQRGenerator: React.FC<TableQRGeneratorProps> = ({ appUrl }) =>
       ];
 
       instructions.forEach((line, index) => {
-        ctx.fillText(line, 178, instructionY + 108 + index * 46);
+        ctx.fillText(line, 158, instructionY + 116 + index * 50);
       });
 
       const dataUrl = canvas.toDataURL("image/png");
