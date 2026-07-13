@@ -2879,6 +2879,178 @@ app.post("/api/orders/:id/pay", async (req, res) => {
   res.json(orders[orderIndex]);
 });
 
+// POST /api/orders/:id/dismiss
+// Desestima/cancela un pedido pendiente sin cerrar caja y sin borrar historial
+app.post("/api/orders/:id/dismiss", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminPassword, reason, dismissedBy } = req.body || {};
+
+    if (!id) {
+      return res.status(400).json({
+        error: "Falta el ID del pedido.",
+      });
+    }
+
+    if (!adminPassword) {
+      return res.status(400).json({
+        error: "Debe ingresar la clave administrativa.",
+      });
+    }
+
+    if (!reason || String(reason).trim().length < 3) {
+      return res.status(400).json({
+        error: "Debe ingresar un motivo válido para desestimar el pedido.",
+      });
+    }
+
+    const expectedPassword =
+      process.env.ADMIN_ACTION_PASSWORD ||
+      process.env.ADMIN_PASSWORD ||
+      "casa123";
+
+    if (String(adminPassword) !== String(expectedPassword)) {
+      return res.status(401).json({
+        error: "Clave administrativa incorrecta.",
+      });
+    }
+
+    let existingOrder: any = null;
+
+    if (supabase) {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (error) {
+        console.error("[DISMISS ORDER] Error buscando pedido:", error.message);
+        return res.status(500).json({
+          error: "No se pudo buscar el pedido para desestimarlo.",
+          details: error.message,
+        });
+      }
+
+      existingOrder = data;
+    } else {
+      const localOrders = loadOrders();
+      existingOrder = localOrders.find((order: any) => order.id === id);
+    }
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        error: "Pedido no encontrado.",
+      });
+    }
+
+    const paymentStatus = String(
+      existingOrder.payment_status ||
+        existingOrder.paymentStatus ||
+        ""
+    ).toLowerCase();
+
+    const currentStatus = String(
+      existingOrder.status ||
+        ""
+    ).toLowerCase();
+
+    if (
+      paymentStatus === "paid" ||
+      paymentStatus === "pagado" ||
+      currentStatus === "approved" ||
+      currentStatus === "preparing" ||
+      currentStatus === "ready" ||
+      currentStatus === "delivered"
+    ) {
+      return res.status(400).json({
+        error:
+          "Este pedido ya fue cobrado o enviado a cocina. No puede desestimarse. Use nota de crédito o ajuste.",
+      });
+    }
+
+    const now = new Date().toISOString();
+    const cleanReason = String(reason).trim();
+    const cleanUser = dismissedBy || "Admin";
+
+    if (supabase) {
+      const updatePayload = {
+        status: "dismissed",
+        payment_status: "cancelled",
+        dismissed_at: now,
+        dismissed_by: cleanUser,
+        dismissed_reason: cleanReason,
+        cancelled_at: now,
+        cancelled_by: cleanUser,
+        cancelled_reason: cleanReason,
+        updated_at: now,
+      };
+
+      const { data, error } = await supabase
+        .from("orders")
+        .update(updatePayload)
+        .eq("id", id)
+        .select("*")
+        .single();
+
+      if (error) {
+        console.error("[DISMISS ORDER] Error actualizando pedido:", error.message);
+        return res.status(500).json({
+          error: "No se pudo desestimar el pedido.",
+          details: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        order: data,
+        message: "Pedido desestimado correctamente.",
+      });
+    }
+
+    const localOrders = loadOrders();
+
+    const updatedOrders = localOrders.map((order: any) => {
+      if (order.id !== id) return order;
+
+      return {
+        ...order,
+        status: "dismissed",
+        paymentStatus: "cancelled",
+        payment_status: "cancelled",
+        dismissedAt: now,
+        dismissed_at: now,
+        dismissedBy: cleanUser,
+        dismissed_by: cleanUser,
+        dismissedReason: cleanReason,
+        dismissed_reason: cleanReason,
+        cancelledAt: now,
+        cancelled_at: now,
+        cancelledBy: cleanUser,
+        cancelled_by: cleanUser,
+        cancelledReason: cleanReason,
+        cancelled_reason: cleanReason,
+        updatedAt: now,
+        updated_at: now,
+      };
+    });
+
+    saveOrders(updatedOrders);
+
+    return res.json({
+      success: true,
+      order: updatedOrders.find((order: any) => order.id === id),
+      message: "Pedido desestimado correctamente.",
+    });
+  } catch (error: any) {
+    console.error("[DISMISS ORDER] Error general:", error);
+    return res.status(500).json({
+      error: "Error interno al desestimar pedido.",
+      details: error?.message || String(error),
+    });
+  }
+});
+
 // GET /api/cash-movements
 app.get("/api/cash-movements", async (req, res) => {
   const { sessionId } = req.query;
